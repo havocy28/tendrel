@@ -1,0 +1,15 @@
+# local Claude Code session settings
+.claude/
+
+# logs & scratch
+*.log
+tmp/
+scratch/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

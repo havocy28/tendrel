@@ -1,0 +1,5 @@
+{
+  "name": "tendrel",
+  "version": "0.2.0",
+  "description": "A research graph + LLM wiki for Claude Code. Typed nodes (experiments, theories, decisions) with evidence lifecycles and dependency edges, kept as markdown in your repo. SessionStart anomaly report; on-demand reconcile; /tendrel:reconcile, /tendrel:status, /tendrel:seed commands; graph visualization in status.md."
+}

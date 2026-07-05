@@ -1,0 +1,11 @@
+{
+  "name": "tendrel",
+  "owner": { "name": "Brian Hur" },
+  "plugins": [
+    {
+      "name": "tendrel",
+      "source": "./plugin",
+      "description": "A research graph for Claude Code — tracks what you've tested, what's validated, what's blocked, and what falls if a result does."
+    }
+  ]
+}
