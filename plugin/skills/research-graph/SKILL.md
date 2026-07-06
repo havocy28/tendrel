@@ -15,6 +15,21 @@ what depends on what, what's validated, what's blocked. The **wiki** (`wiki/`, f
 `raw/`) holds *reference* knowledge — what we know about a topic. They cross-link but stay
 distinct.
 
+## Scaffolding a repo (in-session)
+
+Tendrel operates in any repo that has a `graph/` directory. If a user asks to set up, initialize,
+or seed tendrel in a repo that has none, scaffold it yourself in the session. Do not send them to
+a terminal or a shell script:
+
+1. Ask for the project name (default: the repo directory name).
+2. Create `graph/`, `raw/`, and `wiki/` directories and a `.research-graph` file containing
+   `project = <name>`.
+3. Note that the automatic SessionStart report begins from the next session (the hook already ran
+   when this one opened); seed, reconcile, and status all work immediately.
+
+The bundled `setup-research-repo.sh` does the same thing from the command line and is only a
+convenience for scaffolding many repos at once.
+
 ## The graph: one markdown file per node
 
 Each node is `graph/<ID>.md`: YAML frontmatter carries the structured fields and edges; the

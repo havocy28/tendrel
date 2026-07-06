@@ -135,22 +135,27 @@ renders in your terminal.
 /plugin install tendrel@tendrel
 ```
 
-Then scaffold any repo you want to use it in:
+Enable the plugin for a project (a `/plugin` toggle, no terminal needed), then in a session there:
 
-```bash
-bash setup-research-repo.sh <repo-path> <project-name>   # from a clone of this repo
+```
+/tendrel:seed
 ```
 
-(or just create `raw/`, `wiki/`, `graph/` folders and a `.research-graph` file containing
-`project = <name>`). Enable the plugin for that project, start a new session, and you'll see the
-report. The hooks are scoped: they do nothing in a repo without a `graph/` directory, so the
-plugin is safe to leave installed everywhere.
+Seed scaffolds the repo if it isn't already (it creates `graph/`, `raw/`, `wiki/`, and a
+`.research-graph` marker) and then proposes a starter graph from your project for your approval.
+Everything happens in-session. The one thing that waits is the automatic SessionStart report,
+which begins from your next session, since the hook runs at session open. The hooks are scoped:
+they do nothing in a repo without a `graph/` directory, so the plugin is safe to leave installed
+everywhere.
+
+Prefer the command line, or scaffolding many repos at once? `setup-research-repo.sh <repo-path>
+<project-name>` (from a clone of this repo) does the same scaffold without a session.
 
 ## Quickstart (first ten minutes)
 
-1. Install and scaffold, then open a session in that repo.
-2. `/tendrel:seed`: the guided flow reads your project and proposes nodes for your review before
-   writing anything. Correct them; it writes `graph/`.
+1. Enable the plugin for your repo, then open a session there.
+2. `/tendrel:seed`: it scaffolds the repo if needed, then reads your project and proposes nodes
+   for your review before writing anything. Correct them; it writes `graph/`.
 3. Work normally; reference nodes by ID (*"does this invalidate NODE-004?"*).
 4. At a natural pause: `/tendrel:reconcile`.
 5. `/tendrel:status` anytime for the one-screen view plus graph diagram.
