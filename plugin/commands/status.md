@@ -19,3 +19,7 @@ Regenerate the file fresh from `graph/` each time; never hand-maintain it. If th
 produce the text sections with no diagram. If there is no `graph/` directory, the repo isn't
 scaffolded yet: offer to scaffold it in-session (or point to `/tendrel:seed`) rather than
 generating an empty file.
+
+When `background = on` (see the skill's Background execution section), dispatch a subagent to
+regenerate `status.md` and return a one-line confirmation, so the graph scan stays out of the main
+transcript. Honor `verbosity` in the confirmation.

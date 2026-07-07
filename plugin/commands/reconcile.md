@@ -20,3 +20,7 @@ If this repo has no `graph/` directory, it is not scaffolded yet. Offer to scaff
 (create `graph/`, `raw/`, `wiki/`, and a `.research-graph` file with `project = <name>`), or point
 to `/tendrel:seed`, rather than sending the user to a terminal. Do not create nodes until it is
 scaffolded.
+
+Reconcile is **not** backgrounded: run it inline whatever `background` is set to, because its input
+is the live conversation, which a dispatched subagent cannot see. Honor `verbosity` for the
+summary (`succinct` keeps it to a line or two).

@@ -31,3 +31,8 @@ Then populate:
 If `graph/` already has substantial content, don't duplicate; offer to reconcile or extend the
 existing graph instead. For a fresh repo with no prior work to read, the scaffold plus a couple of
 starter nodes the user names is a fine result.
+
+When `background = on` (see the skill's Configuration and Background execution sections), run the
+read and draft in a subagent so the project scan stays out of the main transcript, then surface the
+one proposal for approval exactly as above. The approval gate is unchanged: nothing is written
+until the user approves. Honor `verbosity` in your summaries.
