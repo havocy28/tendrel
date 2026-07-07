@@ -59,6 +59,31 @@ behind at session open, that's your cue to reconcile.
 grouped text sections. It's generated fresh each time, never hand-maintained (a maintained summary
 drifts). See a rendered example: [`../examples/doc-search/status.md`](../examples/doc-search/status.md).
 
+## Configuration and background execution
+
+Two optional keys in `.research-graph` (`verbosity` and `background`) tune behavior, and both are
+additive: absent means today's behavior, so existing projects are unaffected.
+
+**Verbosity** (`succinct | normal | off`, default `normal`) controls how much surfaces. The
+SessionStart report honors it directly in the hook script; commands honor it in their summaries.
+`off` is deliberately more than silence: since the per-turn Stop hook was removed in v0.0.3, the
+SessionStart report is the only automatic drift signal, so `off` still surfaces confidently-wrong
+anomalies (dangling edges, empty-body nodes) and disables the proactive reconcile offer. Choosing
+`off` means you are self-managing drift.
+
+**Background** (`on | off`, default `off`) runs the heavy read-and-draft work for `status` and
+`seed` in a dispatched subagent, so their file scanning stays out of your main transcript. Two
+honest caveats:
+
+- It isolates *context*, not wall-clock time. A subagent dispatch is synchronous, so you still wait
+  for the operation; you just do not see the scan. It does not let you keep working while it runs.
+- `seed` still surfaces one proposal for your approval before anything is written. Backgrounding
+  moves the reading off-transcript; it never becomes autonomous writing.
+
+`reconcile` is never backgrounded. Its input is the live conversation, which a fresh subagent
+cannot see, so summarizing it first would produce a thinner or wrong graph. Background `reconcile`
+is deferred until an inline-versus-background parity check proves it safe.
+
 ## Plugin data (`CLAUDE_PLUGIN_DATA`)
 
 Tool-global state lives outside your repos, in the plugin's data directory:

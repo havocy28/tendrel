@@ -151,6 +151,27 @@ everywhere.
 Prefer the command line, or scaffolding many repos at once? `setup-research-repo.sh <repo-path>
 <project-name>` (from a clone of this repo) does the same scaffold without a session.
 
+## Configuration (optional)
+
+Two optional keys in your repo's `.research-graph` file tune behavior. Both are additive: omit them
+(or use an unrecognized value) and tendrel behaves exactly as it does today, so nothing changes for
+existing projects.
+
+```
+verbosity = normal    # succinct | normal | off   how much the report and summaries surface
+background = off       # on | off                  run status and seed in a subagent, off-transcript
+```
+
+- **`verbosity`** trims what you see. `succinct` keeps the SessionStart report and command
+  summaries short. `off` silences the routine report but still surfaces confidently-wrong anomalies
+  (dangling edges, empty-body nodes), and it turns off the proactive reconcile nudge, so on `off`
+  you are self-managing drift.
+- **`background`** (opt-in) runs the heavy read-and-draft work for `status` and `seed` in a
+  dispatched subagent, so the file scan stays out of your main transcript. It isolates context, not
+  wall-clock time: the operation still runs synchronously, you just do not see the scan. `seed`
+  still shows you one proposal to approve before writing. `reconcile` always runs inline, since its
+  input is your conversation, which a subagent cannot see.
+
 ## Quickstart (first ten minutes)
 
 1. Enable the plugin for your repo, then open a session there.
