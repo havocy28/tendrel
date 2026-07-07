@@ -46,6 +46,12 @@ changes.
   graph scan stays out of the main transcript. See Background execution below. `seed` and
   `reconcile` always run inline.
 
+**Setting these in-session.** If the user asks to change verbosity or background (for example "make
+the report quieter" or "turn on background mode"), update `.research-graph` yourself: read it, add
+or update the relevant key while preserving every other line and comment, write it back, and
+confirm. `verbosity` takes effect on your command output immediately; the SessionStart report picks
+it up at the next session open. `background` takes effect on the next `status` call.
+
 ## The graph: one markdown file per node
 
 Each node is `graph/<ID>.md`: YAML frontmatter carries the structured fields and edges; the
