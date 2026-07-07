@@ -30,6 +30,22 @@ a terminal or a shell script:
 The bundled `setup-research-repo.sh` does the same thing from the command line and is only a
 convenience for scaffolding many repos at once.
 
+## Configuration (optional)
+
+Two optional keys in `.research-graph` tune behavior. Both are additive: if a key is absent, or
+its value is unrecognized, tendrel behaves exactly as it did before, so existing projects need no
+changes.
+
+- `verbosity = succinct | normal | off` (default `normal`). Controls how much surfaces. The
+  SessionStart report side is handled automatically by the hook script. Your side is command
+  output: at `succinct`, keep reconcile/status/seed summaries to a line or two; at `off`, stay
+  quiet unless something is confidently wrong. Note that `off` also silences the routine
+  SessionStart report and disables the proactive reconcile offer, so a user on `off` is
+  self-managing drift.
+- `background = on | off` (default `off`). When `on`, the heavy read-and-draft work for `status`
+  and `seed` runs in a dispatched subagent so it stays out of the main transcript. See Background
+  execution below. `reconcile` is never backgrounded.
+
 ## The graph: one markdown file per node
 
 Each node is `graph/<ID>.md`: YAML frontmatter carries the structured fields and edges; the
@@ -122,6 +138,35 @@ When reconciling:
    **confidently-wrong** (a reconcile or answer that was definitely incorrect — high priority,
    silent trust erosion) vs **incomplete** (a known gap — lower priority).
 3. Make only the reconcile edits, then return to the user — keep the reconcile output terse.
+
+## Background execution (opt-in)
+
+**Default-path gate: if `.research-graph` has no `background` key, or `background = off`, ignore
+this entire section and behave exactly as you did before (everything inline).** This gate exists
+because this file ships to every project; the instructions below must not change behavior for
+anyone who has not opted in.
+
+When `background = on`, run the heavy read-and-draft work for these operations in a dispatched
+subagent (your Agent/Task tool) and surface only the result, so the file reading stays out of the
+main transcript:
+
+- **status:** dispatch a subagent to read `graph/`, regenerate `status.md`, and return a one-line
+  confirmation. Nothing to approve.
+- **seed:** dispatch a subagent to read the project and draft a proposed node set. It returns the
+  proposal; you surface it for the user's review and **write nodes only after they approve**. The
+  subagent drafts; it never writes the graph on its own. The approval gate holds identically to
+  inline seed.
+
+**reconcile is not backgrounded.** Its input is the live conversation, which a fresh subagent
+cannot see, so summarizing it first would produce a thinner or wrong graph. Run reconcile inline
+as usual, whatever `background` is set to.
+
+Two honesty rules for background mode:
+- It isolates *context*, not wall-clock time. A subagent dispatch is synchronous; the user still
+  waits for the operation, they just do not see the scan in their transcript. Do not imply they
+  can keep working while it runs.
+- On failure, report it and name any files the subagent wrote before failing; never leave a
+  partial write silent. If you cannot confirm what landed, say so plainly.
 
 ## The wiki (reference layer — native file ops, nothing to build)
 
