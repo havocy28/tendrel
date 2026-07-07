@@ -159,7 +159,7 @@ existing projects.
 
 ```
 verbosity = normal    # succinct | normal | off   how much the report and summaries surface
-background = off       # on | off                  run status and seed in a subagent, off-transcript
+background = off       # on | off                  run status in a subagent, off-transcript
 ```
 
 - **`verbosity`** trims what you see. `succinct` keeps the SessionStart report and command

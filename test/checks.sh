@@ -32,7 +32,7 @@ done
 
 # 4. no em dashes in user-facing docs (SKILL.md and spike fixtures excluded: known pre-existing)
 emd=0
-for f in README.md $(find docs -name '*.md' -not -path '*/spike-fixtures/*'); do
+for f in README.md CHANGELOG.md $(find docs -name '*.md' -not -path '*/spike-fixtures/*'); do
   if grep -q "—" "$f"; then echo "  em dash in $f"; emd=1; fi
 done
 [ "$emd" -eq 0 ] && ok "no em dashes in README + docs" || no "no em dashes in README + docs"

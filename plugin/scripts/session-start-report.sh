@@ -58,15 +58,15 @@ for n, v in nodes.items():
 # .research-graph is key=value (NOT colon frontmatter); tolerate whitespace and # comments.
 verbosity = "normal"
 try:
-    for line in open(os.path.join(cwd, ".research-graph"), encoding="utf-8", errors="replace"):
+    for line in open(os.path.join(cwd, ".research-graph"), encoding="utf-8-sig", errors="replace"):
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, _, val = line.partition("=")
         if k.strip() == "verbosity":
-            v = val.strip().strip('"').lower()
-            if v in ("succinct", "normal", "off"):
-                verbosity = v
+            raw = val.split("#", 1)[0].strip().strip('"').lower()   # tolerate a trailing # comment
+            if raw in ("succinct", "normal", "off"):
+                verbosity = raw
 except OSError:
     pass
 
@@ -89,7 +89,7 @@ footer = ("Reconcile on demand: say \"reconcile the graph\" to fold recent work 
 
 if verbosity == "off":
     # Silent except confidently-wrong anomalies: the report is the sole automatic drift signal
-    # since the Stop hook was removed in 0.0.3 (KTD7).
+    # since the Stop hook was removed in 0.0.3.
     emit("\n".join(warn_lines))
 elif verbosity == "succinct":
     emit("\n".join([header] + warn_lines + info_lines))

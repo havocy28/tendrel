@@ -62,6 +62,8 @@ cfg "$T/anom" "verbosity = succinct"
 S="$(run "$T/anom")"
 ne "succinct differs from normal (positive-path)" "$S" "$NORMAL"
 echo "$S" | grep -q "Reconcile on demand" && no "succinct drops footer" "footer present" || ok "succinct drops footer"
+echo "$S" | grep -q "Open theories" && ok "succinct keeps info_lines (open theories)" || no "succinct keeps info_lines (open theories)" "absent"
+echo "$S" | grep -q "Unvalidated" && ok "succinct keeps info_lines (weak nodes)" || no "succinct keeps info_lines (weak nodes)" "absent"
 cfg "$T/anom" "# a comment
 # verbosity: succinct | normal | off
 verbosity = succinct"
@@ -72,6 +74,8 @@ O="$(run "$T/anom")"
 echo "$O" | grep -q "^Research graph for this project" && no "off drops header" "header present" || ok "off drops header"
 echo "$O" | grep -q "WARN" && ok "off keeps confidently-wrong WARN" || no "off keeps confidently-wrong WARN" "no WARN"
 echo "$O" | grep -q "Reconcile on demand" && no "off drops footer" "footer present" || ok "off drops footer"
+echo "$O" | grep -q "Open theories" && no "off drops info_lines (open theories)" "present" || ok "off drops info_lines (open theories)"
+echo "$O" | grep -q "Unvalidated" && no "off drops info_lines (weak nodes)" "present" || ok "off drops info_lines (weak nodes)"
 
 cfg "$T/clean" "verbosity = off"
 eq "off + clean graph emits nothing" "$(run "$T/clean")" ""

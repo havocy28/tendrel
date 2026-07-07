@@ -71,13 +71,21 @@ run_once(){
   echo "DISPATCH:$([ "${disp:-0}" -gt 0 ] && echo 1 || echo 0) CHARS:${chars:-0}"
 }
 
-compliance(){ # $1=label $2=op $3=fixdir
+fail=0
+
+compliance(){ # $1=op  $2=fixdir  $3=expect(high|zero)
   local d=0 i r
   for i in $(seq 1 "$N"); do
-    r=$(run_once "$3" "$2"); echo "  $2 run $i: $r"
+    r=$(run_once "$2" "$1"); echo "  $1 run $i: $r"
     echo "$r" | grep -q "DISPATCH:1" && d=$((d+1))
   done
-  echo "  ==> $2 dispatched $d/$N"
+  echo "  ==> $1 dispatched $d/$N (expect: $3)"
+  if [ "$3" = "high" ] && [ "$d" -eq 0 ]; then
+    echo "  FAIL: $1 never dispatched under background=on (background broken?)"; fail=$((fail+1))
+  fi
+  if [ "$3" = "zero" ] && [ "$d" -gt 0 ]; then
+    echo "  NOTE: $1 dispatched $d/$N though documented inline; not a hard failure, but worth a look."
+  fi
 }
 
 if [ "$OP" = "all" ] || [ "$OP" = "off" ]; then
@@ -85,18 +93,24 @@ if [ "$OP" = "all" ] || [ "$OP" = "off" ]; then
   mkgraphfix "$T/off" "project = t
 background = off"
   r=$(run_once "$T/off" "/tendrel:status"); echo "  $r"
-  echo "$r" | grep -q "DISPATCH:0" && echo "  PASS inline" || echo "  FAIL dispatched under background=off"
+  if echo "$r" | grep -q "DISPATCH:0"; then echo "  PASS inline"; else echo "  FAIL dispatched under background=off"; fail=$((fail+1)); fi
 fi
 
-echo "== compliance: background=on, N=$N =="
 if [ "$OP" = "all" ] || [ "$OP" = "status" ]; then
+  echo "== status compliance: background=on, N=$N (expect high dispatch) =="
   mkgraphfix "$T/on_status" "project = t
 background = on"
-  compliance status "/tendrel:status" "$T/on_status"
+  compliance "/tendrel:status" "$T/on_status" high
 fi
-if [ "$OP" = "all" ] || [ "$OP" = "seed" ]; then
+
+# seed is documented always-inline and is NOT part of the default gate. Run it explicitly
+# (op=seed) to characterize; expected dispatch is ~zero.
+if [ "$OP" = "seed" ]; then
+  echo "== seed characterization: background=on, N=$N (expect inline, ~zero dispatch) =="
   mkseedfix "$T/on_seed" "project = t
 background = on"
-  compliance seed "/tendrel:seed" "$T/on_seed"
+  compliance "/tendrel:seed" "$T/on_seed" zero
 fi
-echo "Target: high dispatch rate under background=on, zero under background=off."
+
+echo "Targets: status = high dispatch under background=on; off-guard = zero; seed = inline (~zero)."
+[ "$fail" -eq 0 ]
