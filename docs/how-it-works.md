@@ -71,18 +71,15 @@ SessionStart report is the only automatic drift signal, so `off` still surfaces 
 anomalies (dangling edges, empty-body nodes) and disables the proactive reconcile offer. Choosing
 `off` means you are self-managing drift.
 
-**Background** (`on | off`, default `off`) runs the heavy read-and-draft work for `status` and
-`seed` in a dispatched subagent, so their file scanning stays out of your main transcript. Two
-honest caveats:
+**Background** (`on | off`, default `off`) runs `status` in a dispatched subagent, so its graph
+scan stays out of your main transcript. It isolates *context*, not wall-clock time: a subagent
+dispatch is synchronous, so you still wait for the operation; you just do not see the scan. It does
+not let you keep working while it runs.
 
-- It isolates *context*, not wall-clock time. A subagent dispatch is synchronous, so you still wait
-  for the operation; you just do not see the scan. It does not let you keep working while it runs.
-- `seed` still surfaces one proposal for your approval before anything is written. Backgrounding
-  moves the reading off-transcript; it never becomes autonomous writing.
-
-`reconcile` is never backgrounded. Its input is the live conversation, which a fresh subagent
-cannot see, so summarizing it first would produce a thinner or wrong graph. Background `reconcile`
-is deferred until an inline-versus-background parity check proves it safe.
+`seed` and `reconcile` run inline. Reconcile's input is the live conversation, which a fresh
+subagent cannot see. Seed produces a proposal you review before anything is written, so delegating
+its read buys little and (measured) does not reliably trigger; it stays inline with its approval
+gate intact. Both may be backgrounded in a future release once the contract reliably triggers.
 
 ## Plugin data (`CLAUDE_PLUGIN_DATA`)
 

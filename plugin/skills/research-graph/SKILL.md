@@ -42,9 +42,9 @@ changes.
   quiet unless something is confidently wrong. Note that `off` also silences the routine
   SessionStart report and disables the proactive reconcile offer, so a user on `off` is
   self-managing drift.
-- `background = on | off` (default `off`). When `on`, the heavy read-and-draft work for `status`
-  and `seed` runs in a dispatched subagent so it stays out of the main transcript. See Background
-  execution below. `reconcile` is never backgrounded.
+- `background = on | off` (default `off`). When `on`, `status` runs in a dispatched subagent so its
+  graph scan stays out of the main transcript. See Background execution below. `seed` and
+  `reconcile` always run inline.
 
 ## The graph: one markdown file per node
 
@@ -146,20 +146,17 @@ this entire section and behave exactly as you did before (everything inline).** 
 because this file ships to every project; the instructions below must not change behavior for
 anyone who has not opted in.
 
-When `background = on`, run the heavy read-and-draft work for these operations in a dispatched
-subagent (your Agent/Task tool) and surface only the result, so the file reading stays out of the
-main transcript:
+When `background = on`, run **status** in a dispatched subagent (your Agent/Task tool) and surface
+only the result, so the graph scan stays out of the main transcript:
 
 - **status:** dispatch a subagent to read `graph/`, regenerate `status.md`, and return a one-line
   confirmation. Nothing to approve.
-- **seed:** dispatch a subagent to read the project and draft a proposed node set. It returns the
-  proposal; you surface it for the user's review and **write nodes only after they approve**. The
-  subagent drafts; it never writes the graph on its own. The approval gate holds identically to
-  inline seed.
 
-**reconcile is not backgrounded.** Its input is the live conversation, which a fresh subagent
-cannot see, so summarizing it first would produce a thinner or wrong graph. Run reconcile inline
-as usual, whatever `background` is set to.
+**seed and reconcile run inline, whatever `background` is set to.** Reconcile's input is the live
+conversation, which a fresh subagent cannot see. Seed produces a proposal the user must review
+anyway, so delegating its read-and-draft buys little; it stays inline, reads the project, proposes
+a node set, and writes only after the user approves (the approval gate is unchanged). Both may be
+backgrounded in a future release once the contract reliably triggers it.
 
 Two honesty rules for background mode:
 - It isolates *context*, not wall-clock time. A subagent dispatch is synchronous; the user still

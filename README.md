@@ -166,11 +166,11 @@ background = off       # on | off                  run status and seed in a suba
   summaries short. `off` silences the routine report but still surfaces confidently-wrong anomalies
   (dangling edges, empty-body nodes), and it turns off the proactive reconcile nudge, so on `off`
   you are self-managing drift.
-- **`background`** (opt-in) runs the heavy read-and-draft work for `status` and `seed` in a
-  dispatched subagent, so the file scan stays out of your main transcript. It isolates context, not
-  wall-clock time: the operation still runs synchronously, you just do not see the scan. `seed`
-  still shows you one proposal to approve before writing. `reconcile` always runs inline, since its
-  input is your conversation, which a subagent cannot see.
+- **`background`** (opt-in) runs `status` in a dispatched subagent, so the graph scan stays out of
+  your main transcript. It isolates context, not wall-clock time: the operation still runs
+  synchronously, you just do not see the scan. `seed` and `reconcile` always run inline (seed's
+  proposal comes back for your approval either way; reconcile's input is your conversation, which a
+  subagent cannot see).
 
 ## Quickstart (first ten minutes)
 
