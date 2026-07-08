@@ -6,6 +6,13 @@
 tmp/
 scratch/
 
+# private planning artifacts must never land in this public repo
+# (ce-brainstorm / ce-plan write here relative to cwd; keep them out)
+docs/brainstorms/
+docs/plans/
+docs/*growth-plan*.md
+docs/*launch-brief*.md
+
 # OS / editor junk
 .DS_Store
 Thumbs.db
