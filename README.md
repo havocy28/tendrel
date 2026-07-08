@@ -49,6 +49,7 @@ just talking. Nothing ever interrupts you mid-task.
 | **Reconcile** | On demand, `/tendrel:reconcile` or *"reconcile the graph"* | Folds recent work into `graph/`: new/updated nodes, status transitions, edges; traces downstream on an invalidation; appends friction. |
 | **Status view** | On demand, `/tendrel:status` or *"regenerate status.md"* | Regenerates `status.md`: a mermaid diagram of your graph plus text sections (theories by stage, nodes by evidence status, decisions, ideas). |
 | **Seed** | On demand, `/tendrel:seed` or *"seed the graph"* | Guided first-population of an empty graph from your project's current state; proposes nodes for approval before writing. |
+| **Lint** | On demand, `/tendrel:lint` or *"lint the graph"* | Runs a deterministic, read-only integrity check over `graph/`: dangling edges, invalid kinds/statuses, duplicate IDs, `depends_on` cycles, invalidation-consistency. On errors, offers approval-gated repair; never auto-writes. |
 | **Dependency query** | On demand, natural language | *"what depends on NODE-004?"* / *"what's blocking THEORY-002?"*, traversal over the typed edges. |
 | **Wiki ingest** | On demand, natural language | *"fold `raw/paper.pdf` into the wiki"*, reference knowledge into `wiki/` concept pages. |
 

@@ -1,5 +1,5 @@
 {
   "name": "tendrel",
-  "version": "0.4.0",
-  "description": "A research graph + LLM wiki for Claude Code. Typed nodes (experiments, theories, decisions) with evidence lifecycles and dependency edges, kept as markdown in your repo. In-session setup via /tendrel:seed; SessionStart anomaly report; on-demand reconcile; /tendrel:reconcile, /tendrel:status, /tendrel:seed commands; configurable verbosity and opt-in background execution for status; graph visualization in status.md."
+  "version": "0.5.0",
+  "description": "A research graph + LLM wiki for Claude Code. Typed nodes (experiments, theories, decisions) with evidence lifecycles and dependency edges, kept as markdown in your repo. In-session setup via /tendrel:seed; SessionStart anomaly report; on-demand reconcile; /tendrel:reconcile, /tendrel:status, /tendrel:seed, /tendrel:lint commands; deterministic read-only graph-integrity lint; configurable verbosity and opt-in background execution for status; graph visualization in status.md."
 }

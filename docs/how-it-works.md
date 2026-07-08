@@ -53,6 +53,20 @@ Reconcile runs when you ask, via `/tendrel:reconcile` or *"reconcile the graph."
 Because nothing forces it, the SessionStart report is the drift backstop: if the graph looks
 behind at session open, that's your cue to reconcile.
 
+## Graph lint (on demand)
+
+`/tendrel:lint` runs a deterministic, read-only script (`plugin/scripts/graph-lint.sh`) over
+`graph/`. This is a deliberate split: **detection is a script, repair is the model.** Integrity is
+load-bearing, so detection is deterministic and never subject to a reasoning lapse; the script
+flags dangling edges, invalid kinds or statuses, duplicate IDs, `depends_on` cycles, and the
+invalidation-consistency rule (a node that `depends_on` an `invalidated` pipeline node must itself
+be `blocked`). It exits non-zero on errors and never writes to `graph/`.
+
+Repair is judgment, so it stays with the model and stays approval-gated. On error-severity
+violations, Claude summarizes them and offers to fix them through the same reconcile behavior it
+uses everywhere else; it writes only after you approve. The script is safe to wire into CI as a
+gate, since a broken graph fails the run while advisory warnings do not.
+
 ## status.md
 
 `/tendrel:status` regenerates `status.md` from `graph/`: a mermaid diagram of the actual graph plus

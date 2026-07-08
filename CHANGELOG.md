@@ -3,6 +3,25 @@
 All notable changes to tendrel. Versions follow semver. The self-hosted marketplace serves the
 default branch, so the latest tagged version is what installs pull on `/plugin marketplace update`.
 
+## 0.5.0 - 2026-07-08
+
+### Added
+- **Deterministic graph lint.** A read-only `plugin/scripts/graph-lint.sh` checks `graph/` for
+  dangling edges (a node-ID or `wiki/` reference that does not exist), invalid `kind`/`status`
+  values, duplicate IDs, `depends_on` cycles, and invalidation-consistency (a node that
+  `depends_on` an `invalidated` pipeline node must itself be `blocked`). It exits non-zero on
+  errors and never writes to `graph/`, so it is safe as a CI gate.
+- **`/tendrel:lint` command** (plus *"lint the graph"*). Runs the script, reports its findings
+  honoring `verbosity`, and on error-severity violations offers approval-gated repair through the
+  normal reconcile behavior. Detection is deterministic (the script); repair stays with the model
+  and only writes after you approve.
+- **Test coverage** (`test/graph-lint.sh`): 12 fixture scenarios, including a positive control
+  (an invalidated node with a correctly-blocked downstream lints clean).
+
+### Compatibility
+- Fully backwards compatible and additive. The lint is opt-in and read-only; with no invocation,
+  behavior is byte-identical to 0.4.0. Nothing changes for existing projects unless they run it.
+
 ## 0.4.0 - 2026-07-07
 
 ### Added
