@@ -171,6 +171,25 @@ Two honesty rules for background mode:
 - On failure, report it and name any files the subagent wrote before failing; never leave a
   partial write silent. If you cannot confirm what landed, say so plainly.
 
+## Graph lint (on demand)
+
+`/tendrel:lint` runs the deterministic `graph-lint.sh` over `graph/`. That script is read-only and
+authoritative for *detection*: it checks for dangling edges (a `to:` node ID or `wiki/` path that
+does not exist), invalid `kind`/`status` values, duplicate IDs, `depends_on` cycles, and the key
+consistency rule, that a node which `depends_on` an `invalidated` `pipeline_node` must itself be
+`blocked`. It exits non-zero on errors; warnings (like an empty body) do not fail.
+
+When the lint reports **error**-severity violations, summarize them and **offer** to fix them; do
+not auto-fix. On the user's approval, repair through the normal reconcile behavior:
+
+- invalidation inconsistency: mark the un-blocked downstream node `blocked`, and trace further
+  downstream as a reconcile would.
+- dangling edge: remove it, or point it at the correct node once you confirm which was meant.
+- invalid `status` or `kind`: correct it to a valid value from the node model.
+
+The lint script never writes to `graph/`; only you do, and only after approval. Honor `verbosity`
+in the summary.
+
 ## The wiki (reference layer — native file ops, nothing to build)
 
 - **Ingest:** when a source lands in `raw/`, read it and fold the relevant content into the
