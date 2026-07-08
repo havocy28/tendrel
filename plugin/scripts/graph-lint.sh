@@ -69,6 +69,14 @@ for nid, rec in nodes.items():
             warnings.append(f"{nid}: experiment missing 'question'")
     if not rec["body"]:
         warnings.append(f"{nid}: empty body (claimed but unlogged)")
+    # Edges the flat-edge parser could not read (e.g. block-style YAML split across lines).
+    # Each edge declares exactly one `rel:`; if the frontmatter has more `rel:` tokens than we
+    # parsed inline, some edges are invisible to the dangling/invalidation checks. Warn rather
+    # than trust silently, since a missed edge would let a broken graph lint clean.
+    declared = len(re.findall(r"\brel:\s", rec["fm"]))
+    if declared > len(rec["edges"]):
+        warnings.append(f"{nid}: {declared - len(rec['edges'])} edge(s) not parsed; keep edges "
+                        "flat, one line each: '- {rel: <relation>, to: <target>}'")
 
 # edge checks: dangling references and invalidation consistency
 for nid, rec in nodes.items():
@@ -81,9 +89,14 @@ for nid, rec in nodes.items():
                 errors.append(f"{nid}: {rel} edge to missing wiki file {to}")
         else:
             warnings.append(f"{nid}: unrecognized {rel} edge target '{to}'")
-        if rel == "depends_on" and to in nodes and nodes[to]["status"] == "invalidated":
+        # Invalidation must propagate transitively. A node that depends_on an invalidated
+        # node must be blocked; a node that depends_on an already-blocked node must also be
+        # blocked. Because "blocked" itself triggers the rule, a single local pass cascades the
+        # whole chain (C invalidated -> B blocked -> A blocked) without a closure walk.
+        if rel == "depends_on" and to in nodes and nodes[to]["status"] in ("invalidated", "blocked"):
             if rec["status"] != "blocked":
-                errors.append(f"{nid}: depends_on invalidated node {to} but is not blocked "
+                dep_status = nodes[to]["status"]
+                errors.append(f"{nid}: depends_on {dep_status} node {to} but is not blocked "
                               f"(status '{rec['status'] or 'none'}')")
 
 # depends_on cycle detection (the pipeline is meant to be a DAG)

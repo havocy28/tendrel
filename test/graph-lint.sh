@@ -192,5 +192,81 @@ d="$(mktemp -d)"
 runlint "$d"
 [ "$RC" -eq 0 ] && ok "no graph/ dir -> exit 0" || no "no graph dir" "rc=$RC out=$OUT"
 
+# 12. transitive invalidation: C invalidated, B blocked, A depends_on B but NOT blocked -> error
+d="$(newfix)"
+node "$d" NODE-C.md '---
+id: NODE-C
+kind: pipeline_node
+status: invalidated
+---
+Bad retriever.'
+node "$d" NODE-B.md '---
+id: NODE-B
+kind: pipeline_node
+status: blocked
+edges:
+  - {rel: depends_on, to: NODE-C}
+---
+Correctly blocked.'
+node "$d" NODE-A.md '---
+id: NODE-A
+kind: pipeline_node
+status: assumed_working
+edges:
+  - {rel: depends_on, to: NODE-B}
+---
+Rests on a blocked node but not blocked itself.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "NODE-A: depends_on blocked node NODE-B but is not blocked"; } \
+  && ok "transitive invalidation (multi-hop) -> error" || no "transitive invalidation" "rc=$RC out=$OUT"
+# positive control: block NODE-A too -> whole chain consistent, exit 0
+node "$d" NODE-A.md '---
+id: NODE-A
+kind: pipeline_node
+status: blocked
+edges:
+  - {rel: depends_on, to: NODE-B}
+---
+Now blocked, chain consistent.'
+runlint "$d"
+[ "$RC" -eq 0 ] && ok "transitive invalidation positive control (whole chain blocked) -> exit 0" \
+  || no "transitive invalidation positive control" "rc=$RC out=$OUT"
+
+# 13. block-style edge (split across lines) is not silently dropped -> warning
+d="$(newfix)"
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: untested
+edges:
+  - rel: depends_on
+    to: NODE-999
+---
+Edge written block-style instead of flat.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "edge(s) not parsed"; } \
+  && ok "block-style edge -> warning (not silently dropped)" || no "block-style edge warning" "rc=$RC out=$OUT"
+
+# 14. malformed frontmatter -> error, and a sibling valid node is still checked (non-fatal)
+d="$(newfix)"
+node "$d" BAD-001.md '---
+id: BAD-001
+kind: experiment
+status: running
+Body with no closing fence.'
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: depends_on, to: NODE-999}
+---
+Valid node with a dangling edge.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "malformed frontmatter" \
+  && echo "$OUT" | grep -q "dangling depends_on edge to missing node NODE-999"; } \
+  && ok "malformed frontmatter -> error, run not aborted (sibling still checked)" \
+  || no "malformed frontmatter non-fatal" "rc=$RC out=$OUT"
+
 echo "---"; echo "graph-lint test: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

@@ -14,7 +14,8 @@ Run the deterministic graph lint and report the result, following the **research
 2. Report its findings, honoring `verbosity` (succinct keeps it to a line or two).
 3. On any **error**-severity violation (the script exits non-zero), summarize the errors and
    **offer** to fix them per the skill's "Graph lint" section. Apply fixes only after the user
-   approves; never auto-fix.
+   approves; never auto-fix. After an approved repair, **re-run the script** and report the result,
+   so the deterministic check confirms the model-driven fix actually held.
 
 If there is no `graph/` directory, the script says the repo isn't scaffolded; relay that and point
 to `/tendrel:seed` rather than treating it as an error.

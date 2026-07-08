@@ -176,8 +176,10 @@ Two honesty rules for background mode:
 `/tendrel:lint` runs the deterministic `graph-lint.sh` over `graph/`. That script is read-only and
 authoritative for *detection*: it checks for dangling edges (a `to:` node ID or `wiki/` path that
 does not exist), invalid `kind`/`status` values, duplicate IDs, `depends_on` cycles, and the key
-consistency rule, that a node which `depends_on` an `invalidated` `pipeline_node` must itself be
-`blocked`. It exits non-zero on errors; warnings (like an empty body) do not fail.
+consistency rule, that a node which `depends_on` an `invalidated` (or already-`blocked`) node must
+itself be `blocked`. That rule cascades: because a blocked dependency also triggers it, invalidation
+must propagate all the way down a chain, not just one hop. It exits non-zero on errors; warnings
+(like an empty body, or an edge the flat-edge parser could not read) do not fail.
 
 When the lint reports **error**-severity violations, summarize them and **offer** to fix them; do
 not auto-fix. On the user's approval, repair through the normal reconcile behavior:
@@ -186,6 +188,11 @@ not auto-fix. On the user's approval, repair through the normal reconcile behavi
   downstream as a reconcile would.
 - dangling edge: remove it, or point it at the correct node once you confirm which was meant.
 - invalid `status` or `kind`: correct it to a valid value from the node model.
+
+After you apply an approved repair, **re-run `graph-lint.sh`** and report the result. Repair is
+model-driven and its quality is not deterministic, so the deterministic check is what confirms the
+fix actually held (and did not introduce a new dangling edge or miss a downstream node). Do not
+report a repair as done until a clean lint confirms it.
 
 The lint script never writes to `graph/`; only you do, and only after approval. Honor `verbosity`
 in the summary.

@@ -8,15 +8,21 @@ default branch, so the latest tagged version is what installs pull on `/plugin m
 ### Added
 - **Deterministic graph lint.** A read-only `plugin/scripts/graph-lint.sh` checks `graph/` for
   dangling edges (a node-ID or `wiki/` reference that does not exist), invalid `kind`/`status`
-  values, duplicate IDs, `depends_on` cycles, and invalidation-consistency (a node that
-  `depends_on` an `invalidated` pipeline node must itself be `blocked`). It exits non-zero on
-  errors and never writes to `graph/`, so it is safe as a CI gate.
+  values, duplicate IDs, `depends_on` cycles, and invalidation-consistency. The consistency rule
+  is transitive: a node that `depends_on` an `invalidated` (or already-`blocked`) node must itself
+  be `blocked`, so invalidation must propagate all the way down a chain, not just one hop. It exits
+  non-zero on errors and never writes to `graph/`, so it is safe as a CI gate.
 - **`/tendrel:lint` command** (plus *"lint the graph"*). Runs the script, reports its findings
   honoring `verbosity`, and on error-severity violations offers approval-gated repair through the
   normal reconcile behavior. Detection is deterministic (the script); repair stays with the model
-  and only writes after you approve.
-- **Test coverage** (`test/graph-lint.sh`): 12 fixture scenarios, including a positive control
-  (an invalidated node with a correctly-blocked downstream lints clean).
+  and only writes after you approve. After an approved repair, the lint is re-run so the
+  deterministic check confirms the fix held.
+- **Robust edge parsing.** Edges the flat-edge parser cannot read (for example, block-style YAML
+  split across lines) are surfaced as a warning rather than silently dropped, so a broken edge
+  cannot let an inconsistent graph lint clean.
+- **Test coverage** (`test/graph-lint.sh`): 16 fixture scenarios, including a multi-hop transitive
+  invalidation case, a block-style-edge warning, a malformed-frontmatter error that does not abort
+  the run, and positive controls (a fully-blocked chain lints clean).
 
 ### Compatibility
 - Fully backwards compatible and additive. The lint is opt-in and read-only; with no invocation,
