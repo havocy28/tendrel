@@ -30,12 +30,13 @@ for f in plugin/skills/research-graph/SKILL.md README.md docs/how-it-works.md; d
     || no "both config keys present in $f" "verbosity/background not both found"
 done
 
-# 4. no em dashes in user-facing docs (SKILL.md and spike fixtures excluded: known pre-existing)
+# 4. no em dashes in user-facing docs and commands (SKILL.md and spike fixtures excluded:
+#    SKILL.md carries known pre-existing em dashes)
 emd=0
-for f in README.md CHANGELOG.md $(find docs -name '*.md' -not -path '*/spike-fixtures/*'); do
+for f in README.md CHANGELOG.md plugin/commands/*.md $(find docs -name '*.md' -not -path '*/spike-fixtures/*'); do
   if grep -q "—" "$f"; then echo "  em dash in $f"; emd=1; fi
 done
-[ "$emd" -eq 0 ] && ok "no em dashes in README + docs" || no "no em dashes in README + docs"
+[ "$emd" -eq 0 ] && ok "no em dashes in README + docs + commands" || no "no em dashes in README + docs + commands"
 
 # 5. relative markdown links resolve to real files
 python3 - <<'PY'

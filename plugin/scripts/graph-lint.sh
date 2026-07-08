@@ -16,6 +16,9 @@ if not os.path.isdir(graphdir):
     print("graph-lint: no graph/ directory here; repo is not scaffolded for tendrel. Nothing to lint.")
     sys.exit(0)
 
+# Source of truth for the node model is the "Node kinds, statuses, IDs" table in
+# plugin/skills/research-graph/SKILL.md. These sets and session-start-report.sh mirror it; if that
+# table changes, update both scripts or the lint will reject valid nodes (or accept invalid ones).
 KINDS = {"experiment", "theory", "pipeline_node", "decision", "idea", "observation"}
 STATUS = {
     "experiment":    {"planned", "running", "complete", "abandoned"},
@@ -26,6 +29,21 @@ STATUS = {
     "observation":   set(),
 }
 NODE_RE = re.compile(r"^[A-Z]+-\d+$")
+
+def declared_edges(fm):
+    """Count the list items under an `edges:` key (block-style: one `- ` per edge). Used to tell
+    when a node declares more edges than we could read on one line, so an unreadable edge is
+    surfaced rather than silently skipped. An inline flow list (`edges: [ ... ]`) returns 0 here,
+    which is safe: we only ever compare `declared > parsed`, so undercounting never false-flags."""
+    count, inside = 0, False
+    for ln in fm.splitlines():
+        if re.match(r"^edges:\s*$", ln):
+            inside = True
+        elif inside and re.match(r"^\S", ln):   # next top-level key ends the block
+            break
+        elif inside and re.match(r"^\s*-\s", ln):
+            count += 1
+    return count
 
 errors, warnings = [], []
 nodes = {}          # id -> record (last-wins for lookups; duplicates flagged separately)
@@ -43,7 +61,13 @@ for path in sorted(glob.glob(os.path.join(graphdir, "*.md"))):
         mm = re.search(rf"^{key}:\s*(.+)$", fm, re.M)
         return mm.group(1).strip().strip('"') if mm else ""
     nid = f("id") or name[:-3]
-    edges = re.findall(r"rel:\s*([a-z_]+),\s*to:\s*([^\s}]+)", fm)
+    # Read each edge from a single line. Tolerant of harmless variation the agent or a human
+    # might introduce: extra spaces around the colons, and extra keys after `to:` (the `[^\s},]+`
+    # target capture stops at a comma or brace, so `{rel: depends_on, to: NODE-4, weight: 1}`
+    # still resolves `NODE-4`). What it deliberately does NOT accept is an edge split across
+    # lines (block-style YAML); those are caught as unreadable below. `.` never crosses a newline
+    # here (no DOTALL), so each match stays within one line.
+    edges = re.findall(r"rel\s*:\s*([a-z_]+).*?\bto\s*:\s*([^\s},]+)", fm)
     id_files.setdefault(nid, []).append(name)
     nodes[nid] = {"file": name, "fm": fm, "kind": f("kind"), "status": f("status"),
                   "body": body.strip(), "edges": edges}
@@ -69,14 +93,13 @@ for nid, rec in nodes.items():
             warnings.append(f"{nid}: experiment missing 'question'")
     if not rec["body"]:
         warnings.append(f"{nid}: empty body (claimed but unlogged)")
-    # Edges the flat-edge parser could not read (e.g. block-style YAML split across lines).
-    # Each edge declares exactly one `rel:`; if the frontmatter has more `rel:` tokens than we
-    # parsed inline, some edges are invisible to the dangling/invalidation checks. Warn rather
-    # than trust silently, since a missed edge would let a broken graph lint clean.
-    declared = len(re.findall(r"\brel:\s", rec["fm"]))
-    if declared > len(rec["edges"]):
-        warnings.append(f"{nid}: {declared - len(rec['edges'])} edge(s) not parsed; keep edges "
-                        "flat, one line each: '- {rel: <relation>, to: <target>}'")
+    # Count how many edges the node declares (list items under `edges:`) versus how many we could
+    # actually read on one line. An edge we cannot read is invisible to the dangling and
+    # invalidation checks, so a broken graph could lint clean. Fail closed: report it as an error
+    # in plain language, naming the file and the correct shape, rather than trusting it silently.
+    if declared_edges(rec["fm"]) > len(rec["edges"]):
+        errors.append(f"{nid}: couldn't read an edge in graph/{rec['file']}. "
+                      "Write each edge on one line, e.g.  - {rel: depends_on, to: NODE-004}")
 
 # edge checks: dangling references and invalidation consistency
 for nid, rec in nodes.items():
@@ -105,19 +128,31 @@ adj = {nid: [to for rel, to in rec["edges"] if rel == "depends_on" and to in nod
 WHITE, GRAY, BLACK = 0, 1, 2
 color = {n: WHITE for n in adj}
 found = []
-def visit(n, stack):
-    color[n] = GRAY
-    stack.append(n)
-    for nxt in adj.get(n, []):
-        if color.get(nxt) == GRAY:
-            found.append(stack[stack.index(nxt):] + [nxt])
-        elif color.get(nxt) == WHITE:
-            visit(nxt, stack)
-    stack.pop()
-    color[n] = BLACK
-for n in list(adj):
-    if color[n] == WHITE:
-        visit(n, [])
+# Iterative DFS so a very deep depends_on chain reports cleanly instead of crashing the
+# interpreter with a RecursionError. `path` mirrors the gray stack, so a back-edge to a gray
+# node reconstructs the cycle in order.
+for start in list(adj):
+    if color[start] != WHITE:
+        continue
+    color[start] = GRAY
+    stack = [(start, iter(adj.get(start, [])))]
+    path = [start]
+    while stack:
+        node, it = stack[-1]
+        advanced = False
+        for nxt in it:
+            if color.get(nxt) == GRAY:
+                found.append(path[path.index(nxt):] + [nxt])
+            elif color.get(nxt) == WHITE:
+                color[nxt] = GRAY
+                stack.append((nxt, iter(adj.get(nxt, []))))
+                path.append(nxt)
+                advanced = True
+                break
+        if not advanced:
+            color[node] = BLACK
+            stack.pop()
+            path.pop()
 seen = set()
 for cyc in found:
     key = frozenset(cyc)

@@ -232,7 +232,7 @@ runlint "$d"
 [ "$RC" -eq 0 ] && ok "transitive invalidation positive control (whole chain blocked) -> exit 0" \
   || no "transitive invalidation positive control" "rc=$RC out=$OUT"
 
-# 13. block-style edge (split across lines) is not silently dropped -> warning
+# 13. block-style edge (split across lines) is unreadable -> plain error, exit 1 (fail closed)
 d="$(newfix)"
 node "$d" NODE-001.md '---
 id: NODE-001
@@ -244,8 +244,8 @@ edges:
 ---
 Edge written block-style instead of flat.'
 runlint "$d"
-{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "edge(s) not parsed"; } \
-  && ok "block-style edge -> warning (not silently dropped)" || no "block-style edge warning" "rc=$RC out=$OUT"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "couldn't read an edge"; } \
+  && ok "block-style edge -> error (not silently dropped)" || no "block-style edge error" "rc=$RC out=$OUT"
 
 # 14. malformed frontmatter -> error, and a sibling valid node is still checked (non-fatal)
 d="$(newfix)"
@@ -267,6 +267,106 @@ runlint "$d"
   && echo "$OUT" | grep -q "dangling depends_on edge to missing node NODE-999"; } \
   && ok "malformed frontmatter -> error, run not aborted (sibling still checked)" \
   || no "malformed frontmatter non-fatal" "rc=$RC out=$OUT"
+
+# 15. tolerant parse: a space in "rel :" still reads the edge, so a dangling ref is caught (was a false negative)
+d="$(newfix)"
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: untested
+edges:
+  - {rel : depends_on, to: NODE-999}
+---
+Edge with a stray space before the colon.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "dangling depends_on edge to missing node NODE-999"; } \
+  && ok "tolerant parse (rel : space) -> dangling caught, not silently dropped" \
+  || no "tolerant parse rel-space" "rc=$RC out=$OUT"
+
+# 16. tolerant parse: a trailing edge field still resolves the target, so a dangling ref is caught
+d="$(newfix)"
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: depends_on, to: NODE-999, weight: 1}
+---
+Edge with an extra key after to:.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "dangling depends_on edge to missing node NODE-999"; } \
+  && ok "tolerant parse (trailing field) -> dangling caught, not silently dropped" \
+  || no "tolerant parse trailing-field" "rc=$RC out=$OUT"
+
+# 17. observation node with a status value -> invalid status error (observation has no status vocab)
+d="$(newfix)"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+status: complete
+---
+Observations do not carry a status.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "invalid status"; } \
+  && ok "observation with status -> error" || no "observation with status" "rc=$RC out=$OUT"
+
+# 18. missing kind -> error
+d="$(newfix)"
+node "$d" X-001.md '---
+id: X-001
+status: complete
+---
+No kind field.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "missing kind"; } \
+  && ok "missing kind -> error" || no "missing kind" "rc=$RC out=$OUT"
+
+# 19. non-observation kind missing status -> warning only, exit 0
+d="$(newfix)"
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+---
+A pipeline node with no status.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "missing status"; } \
+  && ok "missing status (non-observation) -> warning, exit 0" || no "missing status warning" "rc=$RC out=$OUT"
+
+# 20. self-loop cycle (length-1) -> error, with the node named in the cycle path
+d="$(newfix)"
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: depends_on, to: NODE-001}
+---
+Depends on itself.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "depends_on cycle: NODE-001 -> NODE-001"; } \
+  && ok "self-loop cycle -> error with path" || no "self-loop cycle" "rc=$RC out=$OUT"
+
+# 21. cycle path is reported in order (stronger than just grep 'cycle')
+d="$(newfix)"
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: depends_on, to: NODE-002}
+---
+A.'
+node "$d" NODE-002.md '---
+id: NODE-002
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: depends_on, to: NODE-001}
+---
+B.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -qE "depends_on cycle: NODE-00[12] -> NODE-00[12] -> NODE-00[12]"; } \
+  && ok "cycle reported as ordered path" || no "cycle ordered path" "rc=$RC out=$OUT"
 
 echo "---"; echo "graph-lint test: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

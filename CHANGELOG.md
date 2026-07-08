@@ -17,12 +17,18 @@ default branch, so the latest tagged version is what installs pull on `/plugin m
   normal reconcile behavior. Detection is deterministic (the script); repair stays with the model
   and only writes after you approve. After an approved repair, the lint is re-run so the
   deterministic check confirms the fix held.
-- **Robust edge parsing.** Edges the flat-edge parser cannot read (for example, block-style YAML
-  split across lines) are surfaced as a warning rather than silently dropped, so a broken edge
-  cannot let an inconsistent graph lint clean.
-- **Test coverage** (`test/graph-lint.sh`): 16 fixture scenarios, including a multi-hop transitive
-  invalidation case, a block-style-edge warning, a malformed-frontmatter error that does not abort
-  the run, and positive controls (a fully-blocked chain lints clean).
+- **Robust edge parsing.** Edge reading tolerates harmless variation (extra spaces around colons,
+  extra keys after `to:`), so a well-formed edge is never skipped. An edge that genuinely cannot be
+  read on one line (for example, block-style YAML split across lines) now fails closed with a
+  plain-English error naming the file and the correct shape, rather than being silently dropped and
+  letting an inconsistent graph lint clean. Reconcile also rewrites edges in the flat form when it
+  touches a node, so off-format edges heal in normal use.
+- **No crash on deep graphs.** Cycle detection is iterative, so a very deep `depends_on` chain
+  reports cleanly instead of raising a `RecursionError`.
+- **Test coverage** (`test/graph-lint.sh`): 23 fixture scenarios, including multi-hop transitive
+  invalidation, tolerant-parse cases (a stray space and a trailing field, both formerly silent
+  false negatives), an unreadable-edge error, a malformed-frontmatter error that does not abort the
+  run, a self-loop cycle, and positive controls (a fully-blocked chain lints clean).
 
 ### Compatibility
 - Fully backwards compatible and additive. The lint is opt-in and read-only; with no invocation,
