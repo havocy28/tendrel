@@ -1,5 +1,7 @@
 # tendrel
 
+[![tests](https://github.com/havocy28/tendrel/actions/workflows/test.yml/badge.svg)](https://github.com/havocy28/tendrel/actions/workflows/test.yml)
+
 > **tendrel** (རྟེན་འབྲེལ), *Tibetan: "dependent arising."* Nothing in your research stands
 > alone. Tendrel tracks what every conclusion rests on, and what falls when it doesn't hold.
 
@@ -217,6 +219,26 @@ Tool-global state lives in the plugin data directory (outside your repos):
 - **SQLite + MCP server** (added to this plugin): when file-scan traversal strains or the
   dangling-edge audit fires repeatedly.
 - **Wiki search:** when the wiki outgrows file-reading.
+
+## Testing
+
+Run the deterministic suite before pushing (a push to `main` is a release to every installed
+project via marketplace HEAD):
+
+```bash
+bash test/all.sh
+```
+
+It runs the static checks, the graph-lint fixtures, the SessionStart report checks, and a
+backwards-compatibility sweep (the lint run against a corpus of example and older-vintage graphs).
+CI runs the same suite on every push and pull request. Adding a backwards-compat case is dropping a
+graph folder under `test/compat-graphs/`.
+
+The contract-compliance tier (headless, rate-based, needs API access) is opt-in and stays out of CI:
+
+```bash
+bash test/all.sh --contracts
+```
 
 ## Development history
 
