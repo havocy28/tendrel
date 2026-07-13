@@ -60,5 +60,26 @@ print("PASS: relative links resolve")
 PY
 [ $? -eq 0 ] && pass=$((pass+1)) || fail=$((fail+1))
 
+# 6. README carries its load-bearing diagrams. The visual explanation is part of the contract
+#    (the session loop, the node model, the invalidation example, the rendered graph); a rewrite
+#    that drops it should fail here, not get noticed as a mystery months later.
+for h in "## The session loop" "## The node model" "## What an invalidation looks like" "## See it"; do
+  grep -qF "$h" README.md && ok "README section present: $h" || no "README section present: $h"
+done
+fences=$(grep -c '^```mermaid$' README.md)
+[ "$fences" -ge 5 ] && ok "README has >= 5 mermaid diagrams ($fences)" \
+  || no "README has >= 5 mermaid diagrams" "found $fences"
+
+# 7. the graph inlined in README "See it" is byte-identical to examples/doc-search/status.md,
+#    so the showcase copy cannot silently drift from what /tendrel:status actually generates.
+readme_fence(){ awk '/^## See it/{s=1;next} s&&/^## /{exit} s&&/^```mermaid$/{f=1;next} f&&/^```$/{exit} f' README.md; }
+status_fence(){ awk '/^```mermaid$/{f=1;next} f&&/^```$/{exit} f' examples/doc-search/status.md; }
+if [ -n "$(readme_fence)" ] && diff <(readme_fence) <(status_fence) >/dev/null 2>&1; then
+  ok "See-it graph in README matches examples/doc-search/status.md"
+else
+  no "See-it graph in README matches examples/doc-search/status.md" \
+     "re-copy the mermaid fence in README '## See it' from examples/doc-search/status.md"
+fi
+
 echo "---"; echo "checks: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

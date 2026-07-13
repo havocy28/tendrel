@@ -120,11 +120,94 @@ Full reference: [`docs/node-model.md`](docs/node-model.md). How it all works und
 [`docs/how-it-works.md`](docs/how-it-works.md). Task-shaped walkthroughs:
 [`docs/recipes.md`](docs/recipes.md).
 
+## What an invalidation looks like
+
+This is the moment tendrel exists for. Before: the vector-only retriever is assumed working, and
+end-to-end answer quality rests on it. A hybrid-retrieval experiment is running:
+
+```mermaid
+flowchart LR
+  EXP002["EXP-002<br/>hybrid retrieval<br/>(running)"]
+  NODE002["NODE-002<br/>embedding index<br/>(validated)"]
+  NODE003["NODE-003<br/>vector-only retriever<br/>(assumed_working)"]
+  NODE004["NODE-004<br/>end-to-end answer quality<br/>(assumed_working)"]
+  NODE003 -->|depends_on| NODE002
+  NODE004 -->|depends_on| NODE003
+  classDef validated fill:#e6f4ea,stroke:#137333;
+  class NODE002 validated;
+```
+
+The experiment completes: hybrid clearly beats vector-only. Reconcile records the result, marks the
+retriever **invalidated**, and traces downstream: answer quality depended on it, so it flips to
+**blocked**. Red is dead, orange is waiting on a decision from you:
+
+```mermaid
+flowchart LR
+  EXP002["EXP-002<br/>hybrid retrieval<br/>(complete)"]
+  NODE002["NODE-002<br/>embedding index<br/>(validated)"]
+  NODE003["NODE-003<br/>vector-only retriever<br/>(invalidated)"]
+  NODE004["NODE-004<br/>end-to-end answer quality<br/>(blocked)"]
+  EXP002 -->|invalidated_by| NODE003
+  NODE003 -->|depends_on| NODE002
+  NODE004 -->|depends_on| NODE003
+  classDef validated fill:#e6f4ea,stroke:#137333;
+  classDef invalidated fill:#fce8e6,stroke:#c5221f,color:#611;
+  classDef blocked fill:#fef7e0,stroke:#e37400,stroke-dasharray:4 3;
+  class NODE002 validated;
+  class NODE003 invalidated;
+  class NODE004 blocked;
+```
+
+The propagation is not left to good intentions: `/tendrel:lint` deterministically fails a graph
+where anything depends on an invalidated (or blocked) node without itself being blocked, all the
+way down the chain. And your next session opens with the report naming NODE-004 as blocked and why,
+so the state survives the context window that discovered it.
+
 ## See it
 
-The example graph renders right here on GitHub, no screenshots needed. Open
-[`examples/doc-search/status.md`](examples/doc-search/status.md) and GitHub draws the dependency
-graph inline (invalidated and blocked nodes highlighted), with the grouped text sections below it.
+Here is the example project's full graph exactly as `/tendrel:status` generates it, twelve nodes
+of a doc-search pipeline mid-investigation (this is a copy of
+[`examples/doc-search/status.md`](examples/doc-search/status.md); the test suite keeps the two in
+sync):
+
+```mermaid
+flowchart TB
+  THEORY001(["THEORY-001<br/>hybrid > vector-only<br/>(backtest)"])
+  THEORY002(["THEORY-002<br/>reranker recovers precision<br/>(idea)"])
+  EXP001["EXP-001<br/>vector-only baseline"]
+  EXP002["EXP-002<br/>hybrid retrieval"]
+  EXP003["EXP-003<br/>reranker eval (running)"]
+  NODE001["NODE-001<br/>ingestion + chunking"]
+  NODE002["NODE-002<br/>embedding index"]
+  NODE003["NODE-003<br/>vector-only retriever"]
+  NODE004["NODE-004<br/>end-to-end answer quality"]
+  DEC001["DEC-001<br/>512-token chunks"]
+  IDEA001["IDEA-001<br/>query expansion"]
+  OBS001["OBS-001<br/>recall drops on tables"]
+
+  EXP001 -->|part_of| THEORY001
+  EXP002 -->|part_of| THEORY001
+  EXP002 -->|validates| THEORY001
+  EXP002 -->|invalidated_by| NODE003
+  EXP003 -->|part_of| THEORY002
+  EXP003 -->|spawned| IDEA001
+  NODE002 -->|depends_on| NODE001
+  NODE003 -->|depends_on| NODE002
+  NODE004 -->|depends_on| NODE003
+  NODE001 -->|part_of| DEC001
+  DEC001 -->|motivated_by| OBS001
+  IDEA001 -->|motivated_by| OBS001
+
+  classDef validated fill:#e6f4ea,stroke:#137333;
+  classDef invalidated fill:#fce8e6,stroke:#c5221f,color:#611;
+  classDef blocked fill:#fef7e0,stroke:#e37400,stroke-dasharray:4 3;
+  class NODE001,NODE002 validated;
+  class NODE003 invalidated;
+  class NODE004 blocked;
+```
+
+The status file itself carries the grouped text sections below the diagram: theories by stage,
+nodes by evidence status, decisions, and open ideas.
 
 Want to watch it work? Follow the [walkthrough](docs/walkthrough.md): scaffold the example graph,
 open a session, ask "what should I look at first?", finish an experiment, and run
