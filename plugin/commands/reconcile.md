@@ -1,5 +1,5 @@
 ---
-description: Reconcile the research graph. Fold this session's work into graph/ (new/updated nodes, status transitions, edges) per the research-graph skill. On-demand, never automatic.
+description: Reconcile the research graph. Fold this session's work into graph/ (new/updated nodes, status transitions, edges) per the research-graph skill. On-demand by default; runs unattended at natural pauses only in repos that opt in with reconcile = auto.
 ---
 
 # Reconcile the research graph
@@ -24,3 +24,7 @@ scaffolded.
 Reconcile is **not** backgrounded: run it inline whatever `background` is set to, because its input
 is the live conversation, which a dispatched subagent cannot see. Honor `verbosity` for the
 summary (`succinct` keeps it to a line or two).
+
+This explicit command behaves the same whatever the repo's `reconcile` key says. The key controls
+whether *unprompted* reconciles ask first (`ask`, the default) or run unattended at natural pauses
+(`auto`); see the skill's Autonomy section.

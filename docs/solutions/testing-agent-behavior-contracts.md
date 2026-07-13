@@ -1,6 +1,7 @@
 ---
 title: Test agent-behavior contracts empirically; fire-and-forget backgrounds, propose-and-approve does not
 date: 2026-07-07
+last_updated: 2026-07-13
 type: design-learning
 tags: [claude-code, plugin, subagents, background-execution, testing, headless, markdown-contract]
 status: resolved
@@ -68,3 +69,20 @@ Especially before promoting the behavior in the README, docs, or CHANGELOG.
 - Related: [stop-hook-vs-interactive-skills](stop-hook-vs-interactive-skills.md), the same theme:
   agent-runtime behavior needs empirical validation. The Stop-hook mechanism was spike-validated
   before anything was built on it, and its per-turn firing flaw only showed up in real use.
+
+## Update 2026-07-13: headless `claude -p` does not fire SessionStart hooks
+
+Probed directly while measuring the reconcile-autonomy contract: a `claude -p` run with
+`--plugin-dir` never injected the SessionStart report (zero occurrences in the stream-json).
+Two consequences for every harness in `test/`:
+
+- Headless harnesses measure the **skill-activation path only**. A behavior carried by a hook is
+  invisible to them, so a low headless rate can be a floor, not the real-session rate. The
+  reconcile-autonomy measurement hit exactly this: `auto` picked up narrated results 3/3 (strong
+  skill-activation match) but discovered disk drift only ~1/3 headless, and no amount of skill-text
+  strengthening moved it, because on a generic prompt the skill may never activate at all.
+- The inverse design lesson: if a behavior must fire dependably regardless of what the user says,
+  carry it in the hook (which fires unconditionally in real sessions), not only in the skill text.
+  Under `reconcile = auto`, the SessionStart report now instructs instead of nudges, for exactly
+  this reason. Validate the hook side deterministically (pipe a synthetic payload into the script
+  and assert on its output), since the headless model harness cannot see it.

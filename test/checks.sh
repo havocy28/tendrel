@@ -25,10 +25,17 @@ grep -q "verbosity" plugin/scripts/session-start-report.sh \
   && ok "verbosity referenced in report script" \
   || no "verbosity referenced in report script"
 for f in plugin/skills/research-graph/SKILL.md README.md docs/how-it-works.md; do
-  grep -q "verbosity" "$f" && grep -q "background" "$f" \
-    && ok "both config keys present in $f" \
-    || no "both config keys present in $f" "verbosity/background not both found"
+  grep -q "verbosity" "$f" && grep -q "background" "$f" && grep -q "reconcile = ask" "$f" \
+    && ok "all three config keys present in $f" \
+    || no "all three config keys present in $f" "verbosity/background/reconcile not all found"
 done
+
+# 3b. the reconcile autonomy default-path gate survives skill edits. auto must stay opt-in:
+#     the skill ships to every project, so losing this sentence silently changes default behavior.
+grep -qF 'no `reconcile` key, or `reconcile = ask`' plugin/skills/research-graph/SKILL.md \
+  && ok "reconcile default-path gate present in SKILL.md" \
+  || no "reconcile default-path gate present in SKILL.md" \
+       "the 'no reconcile key -> behave exactly as before' sentence is load-bearing"
 
 # 4. no em dashes in user-facing docs and commands (SKILL.md and spike fixtures excluded:
 #    SKILL.md carries known pre-existing em dashes)

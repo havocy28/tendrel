@@ -3,6 +3,39 @@
 All notable changes to tendrel. Versions follow semver. The self-hosted marketplace serves the
 default branch, so the latest tagged version is what installs pull on `/plugin marketplace update`.
 
+## 0.6.0 - 2026-07-13
+
+### Added
+- **Configurable reconcile autonomy.** A third optional `.research-graph` key,
+  `reconcile = ask | auto` (default `ask`). `ask` is the behavior tendrel has always had: offer to
+  reconcile when the graph looks behind, write only on approval. `auto` is a per-repo opt-out of
+  the write gate: at natural pauses (a result lands, a task completes, session open with drift)
+  the agent folds work into `graph/` without asking, then runs the deterministic graph lint on
+  what it wrote and reports the result, so unattended writes still get a non-model integrity
+  check. Explicit `/tendrel:reconcile` behaves identically under both values. Orthogonal to
+  `background` (which controls where output lands, not whether reconcile asks).
+- **Autonomy-aware SessionStart report.** Under `reconcile = auto`, the report's footer switches
+  from the on-demand nudge to an explicit instruction to fold drift in without asking. The hook is
+  the one carrier that does not depend on skill activation, so it, not the skill text, is what
+  makes session-open pickup dependable in real sessions. With no key (or `ask`) the report output
+  is byte-identical to 0.5.0.
+- **Contract measurement** (`test/reconcile-autonomy-integration.sh`): a headless N-run harness
+  asserting the safety invariant (no `reconcile` key or `ask` means zero unattended sweep writes,
+  hard fail) and measuring the `auto` trigger rate. Measured at introduction: the ask/no-key gate
+  held at 0/3 on a disk-drift prompt; `auto` folded narrated results in at 3/3 and discovered
+  disk drift at 1/3 and 2/5 (a floor: headless `claude -p` runs do not fire SessionStart hooks,
+  so the harness cannot see the hook-carried path that covers session open in real use).
+
+### Compatibility
+- Fully backwards compatible and additive. With no `reconcile` key, behavior is byte-identical to
+  0.5.0: the default-path gate in the skill is asserted by `test/checks.sh`, the report's default
+  output is covered by `test/report-verbosity.sh`, and the no-key path was measured against the
+  0.5.0 baseline directly (identical 2/3 live-logging rate on a result-narrating prompt, before
+  and after; live logging of narrated work is long-standing behavior and is not what this key
+  gates).
+
+## 0.5.0 - 2026-07-08
+
 ## 0.5.0 - 2026-07-08
 
 ### Added

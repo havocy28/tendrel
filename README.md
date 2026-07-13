@@ -239,13 +239,14 @@ Prefer the command line, or scaffolding many repos at once? `setup-research-repo
 
 ## Configuration (optional)
 
-Two optional keys in your repo's `.research-graph` file tune behavior. Both are additive: omit them
-(or use an unrecognized value) and tendrel behaves exactly as it does today, so nothing changes for
-existing projects.
+Three optional keys in your repo's `.research-graph` file tune behavior. All are additive: omit
+them (or use an unrecognized value) and tendrel behaves exactly as it does today, so nothing
+changes for existing projects.
 
 ```
 verbosity = normal    # succinct | normal | off   how much the report and summaries surface
 background = off       # on | off                  run status in a subagent, off-transcript
+reconcile = ask        # ask | auto                whether unprompted reconciles ask before writing
 ```
 
 - **`verbosity`** trims what you see. `succinct` keeps the SessionStart report and command
@@ -257,6 +258,12 @@ background = off       # on | off                  run status in a subagent, off
   synchronously, you just do not see the scan. `seed` and `reconcile` always run inline (seed's
   proposal comes back for your approval either way; reconcile's input is your conversation, which a
   subagent cannot see).
+- **`reconcile`** (opt-in per repo) sets reconcile autonomy. `ask`, the default, is today's
+  behavior: when the graph looks behind, tendrel offers a reconcile sweep and runs it only on your
+  approval. `auto` runs the sweep at natural pauses without asking, then runs the deterministic
+  lint on what it wrote and reports the result. The key governs the unprompted sweep; logging work
+  live as you narrate it is unchanged under both values, as it always has been. Asking for a
+  reconcile explicitly also works the same under both.
 
 ## Quickstart (first ten minutes)
 

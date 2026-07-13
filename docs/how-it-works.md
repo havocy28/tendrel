@@ -77,8 +77,8 @@ drifts). See a rendered example: [`../examples/doc-search/status.md`](../example
 
 ## Configuration and background execution
 
-Two optional keys in `.research-graph` (`verbosity` and `background`) tune behavior, and both are
-additive: absent means today's behavior, so existing projects are unaffected.
+Three optional keys in `.research-graph` (`verbosity`, `background`, and `reconcile`) tune
+behavior, and all are additive: absent means today's behavior, so existing projects are unaffected.
 
 **Verbosity** (`succinct | normal | off`, default `normal`) controls how much surfaces. The
 SessionStart report honors it directly in the hook script; commands honor it in their summaries.
@@ -96,6 +96,20 @@ not let you keep working while it runs.
 subagent cannot see. Seed produces a proposal you review before anything is written, so delegating
 its read buys little and (measured) does not reliably trigger; it stays inline with its approval
 gate intact. Both may be backgrounded in a future release once the contract reliably triggers.
+
+**Reconcile autonomy** (`reconcile = ask | auto`, default `ask`) is a different axis from `background`: it
+controls whether unprompted reconcile sweeps ask before writing, not where their output lands.
+`ask` is the behavior tendrel has had since the per-turn Stop hook was removed: offer when the
+graph looks behind, sweep on approval. The gate is specifically about the unprompted sweep, acting
+on drift you did not just narrate; live logging of work as you tell the agent about it is a
+long-standing behavior and identical under both values. `auto` is the per-repo opt-out of the
+sweep's ask: at natural pauses
+(a result lands, a task completes, session open with drift) the agent folds work into `graph/`
+without asking, then runs the deterministic graph lint on what it wrote and reports the result, so
+unattended writes still get a non-model integrity check. The never-interrupt rule is unchanged,
+and lint-error repairs stay approval-gated even under `auto`. Because a background subagent cannot
+see the conversation a reconcile folds in, "seamless" is achieved by not asking, not by
+dispatching: `auto` runs inline, quietly.
 
 ## Plugin data (`CLAUDE_PLUGIN_DATA`)
 

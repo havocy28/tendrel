@@ -54,19 +54,21 @@ for n, v in nodes.items():
         if rel == "depends_on" and re.match(r"^[A-Z]+-\d+$", to) and to not in nodes:
             dangling.append((n, to))
 
-# Optional verbosity from .research-graph (key = value; additive, absent/unknown -> normal).
-# .research-graph is key=value (NOT colon frontmatter); tolerate whitespace and # comments.
+# Optional verbosity and reconcile-autonomy from .research-graph (key = value; additive,
+# absent/unknown -> normal / ask). key=value (NOT colon frontmatter); tolerate # comments.
 verbosity = "normal"
+reconcile = "ask"
 try:
     for line in open(os.path.join(cwd, ".research-graph"), encoding="utf-8-sig", errors="replace"):
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, _, val = line.partition("=")
-        if k.strip() == "verbosity":
-            raw = val.split("#", 1)[0].strip().strip('"').lower()   # tolerate a trailing # comment
-            if raw in ("succinct", "normal", "off"):
-                verbosity = raw
+        raw = val.split("#", 1)[0].strip().strip('"').lower()       # tolerate a trailing # comment
+        if k.strip() == "verbosity" and raw in ("succinct", "normal", "off"):
+            verbosity = raw
+        if k.strip() == "reconcile" and raw in ("ask", "auto"):
+            reconcile = raw
 except OSError:
     pass
 
@@ -86,13 +88,22 @@ if weak_nodes:
 footer = ("Reconcile on demand: say \"reconcile the graph\" to fold recent work into graph/ "
           "per the research-graph skill. (Reconciliation is no longer auto-fired every turn — "
           "it will not interrupt you mid-task.)")
+if reconcile == "auto":
+    # The hook is the one carrier that does not depend on skill activation, so under auto it
+    # must instruct, not nudge: the on-demand reminder would be the wrong instruction here.
+    footer = ("This repo sets reconcile = auto: if the graph is behind what the repo's files "
+              "already say (stale statuses, unlogged results in notes), reconcile it now without "
+              "asking, per the research-graph skill; summarize what changed in a line or two and "
+              "run the graph lint on what you wrote. Never interrupt the user's task to do it.")
 
 if verbosity == "off":
     # Silent except confidently-wrong anomalies: the report is the sole automatic drift signal
-    # since the Stop hook was removed in 0.0.3.
-    emit("\n".join(warn_lines))
+    # since the Stop hook was removed in 0.0.3. Under auto, ride the instruction along only when
+    # the report already speaks; a clean repo stays silent.
+    emit("\n".join(warn_lines + ([footer] if reconcile == "auto" and warn_lines else [])))
 elif verbosity == "succinct":
-    emit("\n".join([header] + warn_lines + info_lines))
+    emit("\n".join([header] + warn_lines + info_lines
+                   + ([footer] if reconcile == "auto" else [])))
 else:  # normal, and any absent or unknown value: byte-identical to pre-0.4.0 output
     emit("\n".join([header] + warn_lines + info_lines + [footer]))
 PY
