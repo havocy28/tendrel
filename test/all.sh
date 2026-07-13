@@ -36,6 +36,7 @@ for t in "${deterministic[@]}"; do run "$t"; done
 if [ "$run_contracts" -eq 1 ]; then
   echo "=== contract tier (headless, needs API access) ==="
   run background-integration.sh
+  run reconcile-autonomy-integration.sh
 fi
 
 echo "==================================="

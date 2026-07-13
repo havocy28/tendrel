@@ -24,7 +24,7 @@ done
 grep -q "verbosity" plugin/scripts/session-start-report.sh \
   && ok "verbosity referenced in report script" \
   || no "verbosity referenced in report script"
-for f in plugin/skills/research-graph/SKILL.md README.md docs/how-it-works.md; do
+for f in plugin/skills/research-graph/SKILL.md README.md docs/how-it-works.md plugin/commands/reconcile.md; do
   grep -q "verbosity" "$f" && grep -q "background" "$f" && grep -q "reconcile = ask" "$f" \
     && ok "all three config keys present in $f" \
     || no "all three config keys present in $f" "verbosity/background/reconcile not all found"

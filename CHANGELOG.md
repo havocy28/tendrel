@@ -36,8 +36,6 @@ default branch, so the latest tagged version is what installs pull on `/plugin m
 
 ## 0.5.0 - 2026-07-08
 
-## 0.5.0 - 2026-07-08
-
 ### Added
 - **Deterministic graph lint.** A read-only `plugin/scripts/graph-lint.sh` checks `graph/` for
   dangling edges (a node-ID or `wiki/` reference that does not exist), invalid `kind`/`status`

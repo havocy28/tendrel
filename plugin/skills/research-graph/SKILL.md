@@ -33,7 +33,7 @@ convenience for scaffolding many repos at once.
 
 ## Configuration (optional)
 
-Two optional keys in `.research-graph` tune behavior. Both are additive: if a key is absent, or
+Three optional keys in `.research-graph` tune behavior. All are additive: if a key is absent, or
 its value is unrecognized, tendrel behaves exactly as it did before, so existing projects need no
 changes.
 
@@ -48,12 +48,14 @@ changes.
   `reconcile` always run inline.
 - `reconcile = ask | auto` (default `ask`). Whether the reconcile sweep asks before writing. `ask`
   is today's behavior: offer when the report shows drift, write only on approval. `auto` reconciles
-  at natural pauses without asking; see Autonomy under the reconcile sweep below. Orthogonal to
-  `background` (which controls where output lands, not whether reconcile asks).
+  at natural pauses without asking; see Autonomy under the reconcile sweep below. Any other value
+  means `ask` (fail closed). Values tolerate a trailing `# comment`, so to stage the key without
+  activating it, comment out the whole line. Orthogonal to `background` (which controls where
+  output lands, not whether reconcile asks).
 
 **Setting these in-session.** If the user asks to change verbosity, background, or reconcile
-autonomy (for example "make the report quieter", "turn on background mode", or "turn on auto
-reconcile"), update `.research-graph` yourself: read it, add or update the relevant key while
+autonomy (for example "make the report quieter", "turn on background mode", "turn on auto
+reconcile", or "go back to asking before reconciling"), update `.research-graph` yourself: read it, add or update the relevant key while
 preserving every other line and comment, write it back, and confirm. `verbosity` takes effect on
 your command output immediately; the SessionStart report picks it up at the next session open.
 `background` takes effect on the next `status` call; `reconcile` at the next natural pause.
@@ -139,11 +141,14 @@ shows the graph is behind (e.g. stale statuses, empty-body nodes). It must never
 user mid-task or hijack a turn where they're being asked a question.
 
 **Autonomy.** Default-path gate: if `.research-graph` has no `reconcile` key, or `reconcile = ask`,
-behave exactly as described above: offer on drift, and sweep only on approval. This gate governs
-the *unprompted sweep*, acting on drift the user did not just narrate; best-effort live logging of
-work as the user tells you about it (see the logging section) is long-standing behavior and is the
-same under every value of this key. This file ships to every project; the `auto` behavior below
-must not change anything for anyone who has not opted in.
+or any value other than `auto` (fail closed), behave exactly as described above: offer on drift,
+and sweep only on approval. This gate governs the *unprompted sweep*, acting on drift the user did
+not just narrate; best-effort live logging of work as the user tells you about it (see the logging
+section) is long-standing behavior and is the same under every value of this key. The test is
+whose statement prompts the write: work the user tells you about in the conversation is live
+logging (write it best-effort under any value); drift you notice by reading files is the sweep,
+and this key gates it. This file ships to every project; the `auto` behavior below must not change
+anything for anyone who has not opted in.
 When `reconcile = auto`, the user has chosen unattended reconcile writes for this repo:
 
 - At session open, if the report shows drift, reconcile right away and summarize what changed in a
@@ -153,9 +158,12 @@ When `reconcile = auto`, the user has chosen unattended reconcile writes for thi
   turn where the user is being asked a question.
 - Discovering drift counts as drift. If, while reading the repo (notes, results, code), you see
   that the graph is behind what the files already say, fold that in before you end the turn; do
-  not merely describe the mismatch or save it for a later offer. Under `auto`, "getting up to
-  speed" includes bringing the graph up to speed.
-- After each auto reconcile, run `graph-lint.sh` and include the result in the summary. Unattended
+  not merely describe the mismatch or save it for a later offer. If you are mid-task when you
+  notice, finish the user's task first, then fold the drift in at the end of that same turn.
+  Under `auto`, "getting up to speed" includes bringing the graph up to speed.
+- After each auto reconcile, run the lint (`bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh"`;
+  if that variable is unset, locate the plugin's `scripts/graph-lint.sh`) and include the result
+  in the summary. Unattended
   writes get the deterministic check; if the lint reports errors, surface them and offer repair per
   the Graph lint section (repairs stay approval-gated even under `auto`).
 - Explicit triggers (`/tendrel:reconcile`, "reconcile the graph") behave identically under both

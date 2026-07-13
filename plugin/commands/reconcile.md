@@ -26,5 +26,5 @@ is the live conversation, which a dispatched subagent cannot see. Honor `verbosi
 summary (`succinct` keeps it to a line or two).
 
 This explicit command behaves the same whatever the repo's `reconcile` key says. The key controls
-whether *unprompted* reconciles ask first (`ask`, the default) or run unattended at natural pauses
-(`auto`); see the skill's Autonomy section.
+whether *unprompted* reconciles ask first (`reconcile = ask`, the default) or run unattended at
+natural pauses (`reconcile = auto`); see the skill's Autonomy section.

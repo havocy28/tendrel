@@ -55,7 +55,8 @@ for n, v in nodes.items():
             dangling.append((n, to))
 
 # Optional verbosity and reconcile-autonomy from .research-graph (key = value; additive,
-# absent/unknown -> normal / ask). key=value (NOT colon frontmatter); tolerate # comments.
+# absent/unknown -> normal / ask). key=value (NOT colon frontmatter); tolerate whitespace and
+# # comments.
 verbosity = "normal"
 reconcile = "ask"
 try:
@@ -67,8 +68,11 @@ try:
         raw = val.split("#", 1)[0].strip().strip('"').lower()       # tolerate a trailing # comment
         if k.strip() == "verbosity" and raw in ("succinct", "normal", "off"):
             verbosity = raw
-        if k.strip() == "reconcile" and raw in ("ask", "auto"):
-            reconcile = raw
+        if k.strip() == "reconcile":
+            # Fail closed: reconcile gates unattended writes, so any explicit line that is not
+            # exactly 'auto' means ask. A user disabling with 'reconcile = off' (a natural guess,
+            # since off is valid for verbosity) must actually disable, not be silently ignored.
+            reconcile = "auto" if raw == "auto" else "ask"
 except OSError:
     pass
 
@@ -94,14 +98,23 @@ if reconcile == "auto":
     footer = ("This repo sets reconcile = auto: if the graph is behind what the repo's files "
               "already say (stale statuses, unlogged results in notes), reconcile it now without "
               "asking, per the research-graph skill; summarize what changed in a line or two and "
-              "run the graph lint on what you wrote. Never interrupt the user's task to do it.")
+              "run the graph lint on what you wrote. Never interrupt the user's task to do it: "
+              "if their first message is itself a task, do that task first, then reconcile "
+              "before ending the turn.")
 
 if verbosity == "off":
     # Silent except confidently-wrong anomalies: the report is the sole automatic drift signal
-    # since the Stop hook was removed in 0.0.3. Under auto, ride the instruction along only when
-    # the report already speaks; a clean repo stays silent.
-    emit("\n".join(warn_lines + ([footer] if reconcile == "auto" and warn_lines else [])))
+    # since the Stop hook was removed in 0.0.3. Under auto, ANY drift (warn or info) carries the
+    # instruction plus its evidence: stale statuses are info-level and are the primary reason to
+    # set auto, and the emitted lines are injected agent context, not a printed banner, so this
+    # costs the user nothing visible. A repo with no drift at all stays silent.
+    if reconcile == "auto" and (warn_lines or info_lines):
+        emit("\n".join(warn_lines + info_lines + [footer]))
+    else:
+        emit("\n".join(warn_lines))
 elif verbosity == "succinct":
+    # Under auto the instruction always rides: succinct trims chrome, not behavior. (Unlike the
+    # off branch above, no drift guard: succinct already emits the header regardless.)
     emit("\n".join([header] + warn_lines + info_lines
                    + ([footer] if reconcile == "auto" else [])))
 else:  # normal, and any absent or unknown value: byte-identical to pre-0.4.0 output

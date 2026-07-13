@@ -83,5 +83,56 @@ eq "off + clean graph emits nothing" "$(run "$T/clean")" ""
 cfg "$T/nograph" "verbosity = succinct"
 eq "no graph/ dir stays silent" "$(run "$T/nograph")" ""
 
+# --- reconcile autonomy branches (v0.6.0). Deterministic coverage for the hook-carried auto
+# --- instruction, per docs/solutions/testing-agent-behavior-contracts.md (validate the hook side
+# --- with synthetic payloads; the headless harness cannot see it).
+
+# infodrift: info-level drift only (an open theory), no confidently-wrong anomalies
+mkdir -p "$T/infodrift/graph"
+cat > "$T/infodrift/graph/THEORY-001.md" <<'EOF'
+---
+id: THEORY-001
+kind: theory
+status: backtest
+---
+Body.
+EOF
+
+rm -f "$T/anom/.research-graph"
+NORMAL2="$(run "$T/anom")"
+cfg "$T/anom" "reconcile = ask"
+eq "reconcile=ask is byte-identical to no key" "$(run "$T/anom")" "$NORMAL2"
+cfg "$T/anom" "reconcile = off"
+eq "invalid reconcile value fails closed to ask (byte-identical)" "$(run "$T/anom")" "$NORMAL2"
+
+cfg "$T/anom" "reconcile = auto"
+A="$(run "$T/anom")"
+echo "$A" | grep -q "reconcile = auto" && ok "auto+normal: footer is the auto instruction" \
+  || no "auto+normal: footer is the auto instruction" "auto line absent"
+echo "$A" | grep -q "Reconcile on demand" && no "auto+normal: on-demand nudge replaced" "old footer present" \
+  || ok "auto+normal: on-demand nudge replaced"
+
+cfg "$T/anom" "verbosity = succinct
+reconcile = auto"
+echo "$(run "$T/anom")" | grep -q "reconcile = auto" && ok "auto+succinct: instruction rides" \
+  || no "auto+succinct: instruction rides" "auto line absent"
+
+cfg "$T/anom" "verbosity = off
+reconcile = auto"
+echo "$(run "$T/anom")" | grep -q "reconcile = auto" && ok "auto+off+warn drift: instruction rides" \
+  || no "auto+off+warn drift: instruction rides" "auto line absent"
+
+cfg "$T/infodrift" "verbosity = off
+reconcile = auto"
+I="$(run "$T/infodrift")"
+echo "$I" | grep -q "reconcile = auto" && ok "auto+off+info-only drift: instruction rides" \
+  || no "auto+off+info-only drift: instruction rides" "auto line absent (stale-status drift silent)"
+echo "$I" | grep -q "Open theories" && ok "auto+off+info-only drift: evidence lines included" \
+  || no "auto+off+info-only drift: evidence lines included" "info lines absent"
+
+cfg "$T/clean" "verbosity = off
+reconcile = auto"
+eq "auto+off+clean graph stays silent" "$(run "$T/clean")" ""
+
 echo "---"; echo "report-verbosity: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]
