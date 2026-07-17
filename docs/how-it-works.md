@@ -75,6 +75,18 @@ gate, since a broken graph fails the run while advisory warnings do not.
 grouped text sections. It's generated fresh each time, never hand-maintained (a maintained summary
 drifts). See a rendered example: [`../examples/doc-search/status.md`](../examples/doc-search/status.md).
 
+## Planning forward (next, on demand)
+
+`/tendrel:next` is the forward-looking counterpart to `status.md`. Where status is a snapshot of
+*state*, next is a synthesis of *history into next steps*: it lints the graph, reads all of it, and
+returns a plain-language brief (what is validated and what it rests on, what was ruled out, open
+theories and their gates, ideas never pursued) plus 2-3 grounded next-experiment proposals, each
+saying why now and what to skip because you already ruled it out. It is read-only, it proposes and
+writes nothing, and it deliberately keeps node IDs out of the brief and proposals (they read like a
+colleague briefing you, not a list of references); a skippable "Where this came from" footer is the
+only place IDs appear, for verifying a surprising claim. Output goes to the transcript, not a file:
+it is advice, not state, and a stale plan on disk would be exactly the drift tendrel warns about.
+
 ## Configuration and background execution
 
 Three optional keys in `.research-graph` (`verbosity`, `background`, and `reconcile`) tune

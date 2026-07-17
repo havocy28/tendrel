@@ -3,6 +3,25 @@
 All notable changes to tendrel. Versions follow semver. The self-hosted marketplace serves the
 default branch, so the latest tagged version is what installs pull on `/plugin marketplace update`.
 
+## 0.7.0 - 2026-07-17
+
+### Added
+- **Forward planning (`/tendrel:next`).** The counterpart to `status.md`: where status is a
+  snapshot of state, this synthesizes history into next steps. It lints the graph, reads the whole
+  history, and returns a plain-language state-of-the-investigation brief plus 2-3 grounded
+  next-experiment proposals, each with why-now and what-to-skip (the paths you already ruled out,
+  the half of the advice a fresh model cannot give). Read-only: it proposes and writes nothing;
+  output goes to the transcript, not a file, because it is advice, not state.
+- **Human-readable contract, enforced.** The brief and proposals name things in plain language and
+  carry no node IDs; the IDs are internal grounding surfaced only in a single skippable "Where this
+  came from" trace footer. `test/checks.sh` guards the contract's load-bearing rule against silent
+  edits, and an on-demand harness (`test/next-integration.sh`) measures the two hard rules on real
+  output: the body is ID-free, and every footer citation resolves to a real node.
+
+### Compatibility
+- Fully backwards compatible and additive. A new skill section, one new command, docs, and one
+  on-demand test; no behavior changes for anyone who does not invoke `/tendrel:next`.
+
 ## 0.6.0 - 2026-07-13
 
 ### Added

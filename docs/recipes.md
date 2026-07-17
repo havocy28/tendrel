@@ -58,3 +58,13 @@ invalidated/blocked nodes highlighted, theories showing lifecycle stage) plus gr
 sections. Browse a rendered example at
 [`../examples/doc-search/status.md`](../examples/doc-search/status.md). It's generated fresh, never
 hand-edited.
+
+## Decide what to run next
+
+When you are mid-investigation and need to weigh everything found and done so far, ask
+`/tendrel:next` (or "what should we run next?"). It lints the graph, reads the whole history, and
+gives you a plain-language brief of where things stand plus 2-3 concrete next-experiment proposals,
+each with why it's the right move now and what to skip because the graph already ruled it out. It
+reads like a colleague catching you up, not a list of node IDs, and it writes nothing: it is advice
+you act on, not state on disk. A skippable "Where this came from" footer maps each claim back to the
+nodes behind it if you want to check one.

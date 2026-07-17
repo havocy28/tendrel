@@ -37,6 +37,7 @@ if [ "$run_contracts" -eq 1 ]; then
   echo "=== contract tier (headless, needs API access) ==="
   run background-integration.sh
   run reconcile-autonomy-integration.sh
+  run next-integration.sh
 fi
 
 echo "==================================="

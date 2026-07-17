@@ -37,6 +37,23 @@ grep -qF 'no `reconcile` key, or `reconcile = ask`' plugin/skills/research-graph
   || no "reconcile default-path gate present in SKILL.md" \
        "the 'no reconcile key -> behave exactly as before' sentence is load-bearing"
 
+# 3c. /tendrel:next command exists with a description, and its contract survives skill edits.
+#     The ID-free-body rule and the trace-footer header are load-bearing: the body rule is the
+#     dogfood failure made into a rule, and test/next-integration.sh splits output on the footer
+#     header, so both must stay stable.
+{ [ -f plugin/commands/next.md ] && grep -q '^description:' plugin/commands/next.md; } \
+  && ok "next.md exists with a description" \
+  || no "next.md exists with a description"
+grep -q '^## Planning forward (next' plugin/skills/research-graph/SKILL.md \
+  && ok "Planning forward (next) section present in SKILL.md" \
+  || no "Planning forward (next) section present in SKILL.md"
+grep -qF 'no node IDs in the brief or the proposals' plugin/skills/research-graph/SKILL.md \
+  && ok "next ID-free-body rule present in SKILL.md" \
+  || no "next ID-free-body rule present in SKILL.md" "the 'no node IDs in the body' rule is load-bearing"
+grep -qF 'Where this came from' plugin/skills/research-graph/SKILL.md \
+  && ok "next trace-footer header present in SKILL.md" \
+  || no "next trace-footer header present in SKILL.md" "test/next-integration.sh splits on this exact header"
+
 # 4. no em dashes in user-facing docs and commands (SKILL.md and spike fixtures excluded:
 #    SKILL.md carries known pre-existing em dashes)
 emd=0

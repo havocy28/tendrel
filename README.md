@@ -52,6 +52,7 @@ just talking. Nothing ever interrupts you mid-task.
 | **Status view** | On demand, `/tendrel:status` or *"regenerate status.md"* | Regenerates `status.md`: a mermaid diagram of your graph plus text sections (theories by stage, nodes by evidence status, decisions, ideas). |
 | **Seed** | On demand, `/tendrel:seed` or *"seed the graph"* | Guided first-population of an empty graph from your project's current state; proposes nodes for approval before writing. |
 | **Lint** | On demand, `/tendrel:lint` or *"lint the graph"* | Runs a deterministic, read-only integrity check over `graph/`: dangling edges, invalid kinds/statuses, duplicate IDs, `depends_on` cycles, invalidation-consistency. On errors, offers approval-gated repair; never auto-writes. |
+| **Next** | On demand, `/tendrel:next` or *"what should we run next?"* | Reads the whole graph and returns a plain-language state-of-the-investigation brief plus 2-3 grounded next-experiment proposals, each with why-now and what-to-skip (the things you already ruled out). Read-only; writes nothing. |
 | **Dependency query** | On demand, natural language | *"what depends on NODE-004?"* / *"what's blocking THEORY-002?"*, traversal over the typed edges. |
 | **Wiki ingest** | On demand, natural language | *"fold `raw/paper.pdf` into the wiki"*, reference knowledge into `wiki/` concept pages. |
 
