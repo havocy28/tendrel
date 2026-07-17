@@ -50,9 +50,11 @@ grep -q '^## Planning forward (next' plugin/skills/research-graph/SKILL.md \
 grep -qF 'no node IDs in the brief or the proposals' plugin/skills/research-graph/SKILL.md \
   && ok "next ID-free-body rule present in SKILL.md" \
   || no "next ID-free-body rule present in SKILL.md" "the 'no node IDs in the body' rule is load-bearing"
-grep -qF 'Where this came from' plugin/skills/research-graph/SKILL.md \
-  && ok "next trace-footer header present in SKILL.md" \
-  || no "next trace-footer header present in SKILL.md" "test/next-integration.sh splits on this exact header"
+for f in plugin/skills/research-graph/SKILL.md plugin/commands/next.md; do
+  grep -qF 'Where this came from' "$f" \
+    && ok "next trace-footer header present in $f" \
+    || no "next trace-footer header present in $f" "SKILL, command, and test/next-integration.sh must name the footer identically"
+done
 
 # 4. no em dashes in user-facing docs and commands (SKILL.md and spike fixtures excluded:
 #    SKILL.md carries known pre-existing em dashes)

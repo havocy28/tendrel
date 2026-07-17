@@ -296,16 +296,18 @@ don't re-run something already done.
 next?") turns the whole graph into a forward plan. Where `status.md` is a snapshot of state, this is
 a synthesis of *history into next steps*. It is read-only: it proposes, it never writes `graph/`.
 
-1. **Lint first.** Run `graph-lint.sh` (`bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh"`; if
-   that variable is unset, locate the plugin's `scripts/graph-lint.sh`). On error-severity
-   violations, summarize them and offer repair per the Graph lint section before trusting a plan;
-   do not silently plan on a graph that fails integrity. Warnings do not block planning.
+1. **Lint first.** Run `graph-lint.sh` (`bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh"` with the
+   repo root as its argument; if that variable is unset, locate the plugin's `scripts/graph-lint.sh`).
+   On error-severity violations, summarize them and offer repair per the Graph lint section before
+   trusting a plan; do not silently plan on a graph that fails integrity. If the user asks to proceed
+   anyway, plan with a prominent caveat naming the integrity problems that may skew the analysis.
+   Warnings do not block planning.
 2. **Read the whole graph**, not just the anomaly summary. Reconstruct the investigation arc.
 3. **Produce a brief, then proposals**, in this order:
-   - **Brief** — what is validated and what it rests on; what was invalidated and what that ruled
+   - **Brief:** what is validated and what it rests on; what was invalidated and what that ruled
      out; open theories and their `next_gate`; ideas that were `spawned` but never pursued. Group
      it by the actual arc of the work, not by node kind.
-   - **Proposals** — 2-3 concrete next experiments. Each names *why now* and *what to skip and why*.
+   - **Proposals:** 2-3 concrete next experiments. Each names *why now* and *what to skip and why*.
      The negative grounding ("skip X, you already ruled it out in ...") is required, not optional:
      it is the half of the advice a fresh model cannot give and the reader would otherwise waste
      weeks rediscovering.
@@ -324,5 +326,6 @@ Everything above the footer must stand on its own without it.
 
 Honor `verbosity`: `succinct` trims the brief toward the arc summary and keeps the proposals and the
 footer; `off` still answers when asked directly (this is on-demand, not an automatic surface). Works
-in any tendrel repo with no other plugins installed. If there is no `graph/`, the repo isn't
-scaffolded; offer to scaffold or point to `/tendrel:seed` rather than planning from nothing.
+in any tendrel repo with no other plugins installed. If there is no `graph/`, or it exists but has
+no nodes yet, the repo isn't scaffolded for planning; offer to scaffold or point to `/tendrel:seed`
+rather than planning from nothing (there is no history to synthesize).

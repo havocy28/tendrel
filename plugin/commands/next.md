@@ -22,5 +22,6 @@ the source of truth for how this works.
 
 This is read-only: it proposes next steps and never writes to `graph/`.
 
-If there is no `graph/` directory, the repo isn't scaffolded yet: offer to scaffold it in-session
-(or point to `/tendrel:seed`) rather than planning from an empty graph.
+If there is no `graph/` directory, or it exists but has no nodes yet, the repo isn't scaffolded for
+planning: offer to scaffold it in-session (or point to `/tendrel:seed`) rather than planning from an
+empty graph, there is no history to synthesize.
