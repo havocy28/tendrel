@@ -13,8 +13,9 @@
 # The node-ID matcher is anchored to tendrel's actual prefixes, so domain terms that look
 # ID-shaped (ICD-11, GPT-4) do not false-trigger.
 #
-# Measured 2026-07-17 (N=2, examples/doc-search): ID-free body 2/2, grounded footer 2/2,
-# negative-grounding 2/2. Deterministic self-checks pass without spending tokens.
+# Measured 2026-07-17 (N=10, examples/doc-search): ID-free body 10/10, grounded footer 10/10
+# (both hard rules hold across the tail), negative-grounding 9/10 (soft heuristic; prose varies).
+# The six deterministic self-checks pass without spending tokens.
 #
 # Usage: bash test/next-integration.sh [N]   (N model runs, default 3)
 # Env:   TENDREL_TEST_MODEL=<model>  to run a cheaper model and cut cost.
