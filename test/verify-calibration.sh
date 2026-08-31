@@ -429,5 +429,75 @@ print('  --> rounding-recoverable is fixable by KTD6 alone.')
 print('  --> declared-wrong is fixable by declaration or wider seeding.')
 print('  --> nowhere-in-repo is what R3 structurally cannot check.')
 
+rule('10. MATCHING PRECISION -- null test  (KTD6 rounding rule)')
+# The question a raw match rate cannot answer: how often does a claim pass against an artifact that
+# did NOT produce it? Each node's claims are tested against ANOTHER node's declared artifacts.
+names = sorted(seed_body)
+byprec = {}
+tot_ex = tot_rd = tot_n = 0
+for i, name in enumerate(names):
+    other = names[(i + 1) % len(names)] if len(names) > 1 else None
+    if other is None or other == name:
+        continue
+    blob = '\n'.join(filter(None, (read_artifact(p) for p in seed_body[other])))
+    if not blob:
+        continue
+    for c in whole_claims[name]:
+        k = len(c.split('.')[1]) if '.' in c else 0
+        key = '2dp' if k == 2 else ('3dp' if k == 3 else '4dp+')
+        d = byprec.setdefault(key, [0, 0, 0])
+        d[2] += 1; tot_n += 1
+        if match(c, blob):
+            d[0] += 1; tot_ex += 1
+        elif rounds_to(blob, c):
+            d[1] += 1; tot_rd += 1
+
+def rate(x, n):
+    return '%5.1f%%' % (100.0 * x / n) if n else '   n/a'
+
+print('  claims tested against a NON-producing artifact : %d' % tot_n)
+print('    pass under exact matching                    : %4d  %s' % (tot_ex, rate(tot_ex, tot_n)))
+print('    additional pass under precision-aware        : %4d  %s' % (tot_rd, rate(tot_rd, tot_n)))
+print('    combined coincidental pass rate              : %4d  %s'
+      % (tot_ex + tot_rd, rate(tot_ex + tot_rd, tot_n)))
+print()
+print('  by claim precision (exact / +rounding / total):')
+for k in ('2dp', '3dp', '4dp+'):
+    if k in byprec:
+        ex, rd, nn = byprec[k]
+        print('    %-5s  %3d %s   %3d %s   of %d'
+              % (k, ex, rate(ex, nn), rd, rate(rd, nn), nn))
+print()
+print('  --> a rounding match that clears a claim carries little provenance information.')
+
+rule('11. SUGGESTION PRECISION  (U2 candidate naming)')
+# For claims whose true source is known (they match exactly in one of the node's own declared
+# artifacts), would the candidate suggestion have named that artifact? Precision is measured at
+# each cap: fraction of NAMED files that are actually a true source.
+for cap in (1, 2, 3, 5):
+    fired = named = correct = 0
+    for name, paths in seed_body.items():
+        truth = set()
+        for p in paths:
+            b = read_artifact(p)
+            if b:
+                for c in whole_claims[name]:
+                    if match(c, b):
+                        truth.add((c, p))
+        for c in whole_claims[name]:
+            tset = {p for (cc, p) in truth if cc == c}
+            if not tset:
+                continue
+            cands = sorted(repo_index.get(c.replace(',', ''), set()))
+            if not cands or len(cands) > cap:
+                continue
+            fired += 1
+            named += len(cands)
+            correct += sum(1 for p in cands if p in tset)
+    print('  cap %d: fires on %4d claims, names %4d files, %4d are a true source  -> precision %s'
+          % (cap, fired, named, correct, rate(correct, named)))
+print()
+print('  --> precision collapses at the first step past a unique holder, not at high fan-out.')
+
 print()
 PY

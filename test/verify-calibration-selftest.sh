@@ -375,6 +375,61 @@ This line first read 0.8888, which was corrected. See `results/a.txt`.'
 runcal "$d"
 expect "attribution sentence flagged" "$(num 'in an attribution/supersession sentence')" "1"
 
+# ---------------------------------------------------------------- 10-11. null test / suggestions
+# Two nodes. A's claim 0.50 is absent from A's artifact but B's artifact holds 0.5012, which rounds
+# to it -- a coincidental rounding pass against an artifact that did not produce the number.
+d="$(newfix)"
+art "$d" results/a.txt 'A holds 0.7777'
+art "$d" results/b.txt 'B holds 0.5012'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+---
+Claim 0.50 per `results/a.txt`.'
+node "$d" EXP-002.md '---
+id: EXP-002
+kind: experiment
+status: complete
+---
+Claim 0.7777 per `results/b.txt`.'
+runcal "$d"
+expect "null test counts both nodes claims" "$(num 'claims tested against a NON-producing artifact')" "2"
+expect "coincidental rounding pass detected" "$(num 'additional pass under precision-aware')" "1"
+
+# Exact coincidental pass: A claims 0.7777, B's artifact literally holds 0.7777.
+d="$(newfix)"
+art "$d" results/a.txt 'nothing'
+art "$d" results/b.txt 'B holds 0.7777'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+---
+Claim 0.7777 per `results/a.txt`.'
+node "$d" EXP-002.md '---
+id: EXP-002
+kind: experiment
+status: complete
+---
+Claim 0.1234 per `results/b.txt`.'
+runcal "$d"
+expect "exact coincidental pass detected" "$(num 'pass under exact matching')" "1"
+
+# Suggestion precision: the number lives in exactly one repo file, which is the declared one.
+d="$(newfix)"
+art "$d" results/a.txt 'unique value 0.8642 here'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+---
+Claim 0.8642 per `results/a.txt`.'
+runcal "$d"
+capline="$(echo "$OUT" | grep -m1 '^  cap 1:')"
+expect "cap 1 fires on the unique holder"  "$(echo "$capline" | grep -oE 'fires on +[0-9]+' | grep -oE '[0-9]+')" "1"
+expect "cap 1 precision is 100%"           "$(echo "$capline" | grep -oE 'precision +[0-9.]+%' | grep -oE '[0-9.]+')" "100.0"
+
 echo
 echo "verify-calibration selftest: $pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1
