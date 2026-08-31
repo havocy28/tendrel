@@ -279,6 +279,23 @@ print('  B. crude scan (claims, no resolving path)  : %d' % len(crude))
 print('  overlap |A n B|                            : %d' % len(verify_backlog & crude))
 print('  --> comparing |A| to |B| is only meaningful when the overlap is near the smaller set.')
 
+rule('8. ARTIFACT CORPUS  (KTD6 denominators)')
+arts, sci_n = 0, 0
+for base in ('results', 'work', 'meta'):
+    for dp, _, fns in os.walk(os.path.join(root, base)):
+        for fn in fns:
+            p = os.path.join(dp, fn)
+            try:
+                if os.path.getsize(p) > 8 * 1024 * 1024:
+                    continue
+                s = open(p, encoding='utf-8', errors='strict').read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            arts += 1
+            if re.search(r'\d\.?\d*[eE][+-]\d', s):
+                sci_n += 1
+print('  readable text artifacts                : %d' % arts)
+print('  ...using scientific notation           : %d' % sci_n)
 rule('9. UNMATCHED RESIDUE  (what R3 cannot check, and why)')
 # Every unmatched claim under the best measured settings (wide seed source, scripts searched,
 # adjacent-token hedging, anchored + sci matching) is classified mechanically. The buckets decide
@@ -412,22 +429,5 @@ print('  --> rounding-recoverable is fixable by KTD6 alone.')
 print('  --> declared-wrong is fixable by declaration or wider seeding.')
 print('  --> nowhere-in-repo is what R3 structurally cannot check.')
 
-rule('8. ARTIFACT CORPUS  (KTD6 denominators)')
-arts, sci_n = 0, 0
-for base in ('results', 'work', 'meta'):
-    for dp, _, fns in os.walk(os.path.join(root, base)):
-        for fn in fns:
-            p = os.path.join(dp, fn)
-            try:
-                if os.path.getsize(p) > 8 * 1024 * 1024:
-                    continue
-                s = open(p, encoding='utf-8', errors='strict').read()
-            except (OSError, UnicodeDecodeError):
-                continue
-            arts += 1
-            if re.search(r'\d\.?\d*[eE][+-]\d', s):
-                sci_n += 1
-print('  readable text artifacts                : %d' % arts)
-print('  ...using scientific notation           : %d' % sci_n)
 print()
 PY
