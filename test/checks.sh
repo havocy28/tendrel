@@ -57,9 +57,15 @@ for f in plugin/skills/research-graph/SKILL.md plugin/commands/next.md; do
 done
 
 # 4. no em dashes in user-facing docs and commands (SKILL.md and spike fixtures excluded:
-#    SKILL.md carries known pre-existing em dashes)
+#    SKILL.md carries known pre-existing em dashes).
+#    Only TRACKED docs are scanned. docs/plans/ is gitignored working material, and walking the
+#    filesystem for it made this check fail locally for anyone using the documented plan workflow
+#    while CI -- which checks out a clean tree with no docs/plans/ -- stayed green. A gate that is
+#    red only on developer machines is a gate people learn to ignore.
 emd=0
-for f in README.md CHANGELOG.md plugin/commands/*.md $(find docs -name '*.md' -not -path '*/spike-fixtures/*'); do
+docfiles="$(git ls-files -- 'docs/*.md' 2>/dev/null | grep -v '/spike-fixtures/' || true)"
+for f in README.md CHANGELOG.md plugin/commands/*.md $docfiles; do
+  [ -f "$f" ] || continue
   if grep -q "—" "$f"; then echo "  em dash in $f"; emd=1; fi
 done
 [ "$emd" -eq 0 ] && ok "no em dashes in README + docs + commands" || no "no em dashes in README + docs + commands"
