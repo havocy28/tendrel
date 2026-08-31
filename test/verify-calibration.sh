@@ -279,6 +279,139 @@ print('  B. crude scan (claims, no resolving path)  : %d' % len(crude))
 print('  overlap |A n B|                            : %d' % len(verify_backlog & crude))
 print('  --> comparing |A| to |B| is only meaningful when the overlap is near the smaller set.')
 
+rule('9. UNMATCHED RESIDUE  (what R3 cannot check, and why)')
+# Every unmatched claim under the best measured settings (wide seed source, scripts searched,
+# adjacent-token hedging, anchored + sci matching) is classified mechanically. The buckets decide
+# whether R3 is fixable by better matching, by better declaration, or not at all.
+
+# Index every qualifying number appearing anywhere in the repo's text artifacts, once.
+repo_index = {}
+for base in ('results', 'work', 'meta', 'scripts', 'raw'):
+    bd = os.path.join(root, base)
+    if not os.path.isdir(bd):
+        continue
+    for dp, _, fns in os.walk(bd):
+        for fn in fns:
+            p = os.path.join(dp, fn)
+            try:
+                if os.path.getsize(p) > 8 * 1024 * 1024:
+                    continue
+                s = open(p, encoding='utf-8', errors='strict').read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            s = s + '\n' + canon_sci(s)
+            for c in set(claims(s)):
+                repo_index.setdefault(c.replace(',', ''), set()).add(
+                    os.path.relpath(p, root))
+
+NUM_ANY = re.compile(r'(?<![\w.])(\d[\d,]*\.\d+)(?![\w.])')
+
+def rounds_to(blob, claim):
+    """Does any number in blob round to claim at the claim's own precision?"""
+    if '.' not in claim:
+        return False
+    k = len(claim.split('.')[1])
+    try:
+        target = float(claim.replace(',', ''))
+    except ValueError:
+        return False
+    for m in NUM_ANY.finditer(blob):
+        tok = m.group(1).replace(',', '')
+        if len(tok.split('.')[1]) <= k:
+            continue
+        try:
+            if abs(round(float(tok), k) - target) < 10 ** -(k + 3):
+                return True
+        except ValueError:
+            continue
+    return False
+
+ATTRIB = ['first read', 'originally', 'previously', 'superseded', 'corrected',
+          'the original', 'earlier', 'retracted', 'was reported', 'pre-registered',
+          'must not be restated', 'instead of']
+
+def on_table_line(text, claim):
+    for line in text.split('\n'):
+        if re.match(r'^(\s{2,}|\|)', line) and claim in line:
+            return True
+    return False
+
+def attributed(text, claim):
+    for sent in sentences(text):
+        if claim in sent and any(a in sent.lower() for a in ATTRIB):
+            return True
+    return False
+
+buckets = {'rounding-recoverable': 0, 'declared-wrong': 0, 'nowhere-in-repo': 0}
+spread = {'1-3 candidate files (real missing declaration)': 0,
+          '4-10 candidate files': 0,
+          '>10 candidate files (likely coincidental)': 0}
+cross = {'on-table-line': 0, 'attributed': 0}
+residue_total = 0
+for name, paths in seed_body.items():
+    searched = paths
+    blob = '\n'.join(filter(None, (read_artifact(p) for p in searched)))
+    txt = allt[name]
+    hedged = set()
+    for m in CLAIM.finditer(txt):
+        pre = txt[max(0, m.start() - 24):m.start()]
+        tail = pre.lower().rstrip()
+        if pre.endswith('~') or any(tail.endswith(mk) for mk in MARKERS_TRIM):
+            hedged.add(m.start())
+    for m in CLAIM.finditer(txt):
+        if m.start() in hedged:
+            continue
+        c = m.group(1)
+        if match(c, blob):
+            continue
+        residue_total += 1
+        key = c.replace(',', '')
+        if rounds_to(blob, c):
+            buckets['rounding-recoverable'] += 1
+        elif key in repo_index:
+            buckets['declared-wrong'] += 1
+            nc = len(repo_index[key])
+            if nc <= 3:
+                spread['1-3 candidate files (real missing declaration)'] += 1
+            elif nc <= 10:
+                spread['4-10 candidate files'] += 1
+            else:
+                spread['>10 candidate files (likely coincidental)'] += 1
+        else:
+            buckets['nowhere-in-repo'] += 1
+        if on_table_line(txt, c):
+            cross['on-table-line'] += 1
+        if attributed(txt, c):
+            cross['attributed'] += 1
+
+def share(x):
+    return '%5.1f%%' % (100.0 * x / residue_total) if residue_total else '   n/a'
+
+print('  unmatched claims at best settings      : %d' % residue_total)
+print()
+print('  MUTUALLY EXCLUSIVE -- what would fix each:')
+print('    rounding-recoverable (precision-aware match) : %4d  %s'
+      % (buckets['rounding-recoverable'], share(buckets['rounding-recoverable'])))
+print('    declared-wrong (number IS elsewhere in repo) : %4d  %s'
+      % (buckets['declared-wrong'], share(buckets['declared-wrong'])))
+print('    nowhere-in-repo (derived or external)        : %4d  %s'
+      % (buckets['nowhere-in-repo'], share(buckets['nowhere-in-repo'])))
+print()
+print('  declared-wrong, by how many repo files hold that number:')
+for k in ('1-3 candidate files (real missing declaration)', '4-10 candidate files',
+          '>10 candidate files (likely coincidental)'):
+    print('    %-44s : %4d  %s' % (k, spread[k], share(spread[k])))
+print()
+print('  OVERLAPPING CONTEXT -- why the number is there:')
+print('    on a table/indented line                     : %4d  %s'
+      % (cross['on-table-line'], share(cross['on-table-line'])))
+print('    in an attribution/supersession sentence      : %4d  %s'
+      % (cross['attributed'], share(cross['attributed'])))
+print()
+print('  --> rounding-recoverable is fixable by KTD6 alone.')
+print('  --> declared-wrong is fixable by declaration or wider seeding.')
+print('  --> nowhere-in-repo is what R3 structurally cannot check.')
+
 rule('8. ARTIFACT CORPUS  (KTD6 denominators)')
 arts, sci_n = 0, 0
 for base in ('results', 'work', 'meta'):

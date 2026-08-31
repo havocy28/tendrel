@@ -283,6 +283,98 @@ runcal "$d"; first="$OUT"
 runcal "$d"; second="$OUT"
 expect "two runs agree" "$( [ "$first" = "$second" ] && echo same || echo differs )" "same"
 
+# ---------------------------------------------------------------- 9. residue classifier
+# rounding-recoverable: artifact holds 1.19698, node claims 1.20 -> rounds to it at 2dp.
+d="$(newfix)"
+art "$d" results/a.txt 'ratio 1.19698 measured'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+---
+The ratio was 1.20 per `results/a.txt`.'
+runcal "$d"
+expect "rounding-recoverable detected"  "$(num 'rounding-recoverable')" "1"
+expect "not counted as nowhere"         "$(num 'nowhere-in-repo')" "0"
+
+# declared-wrong: the number lives in a DIFFERENT repo file than the one declared.
+d="$(newfix)"
+art "$d" results/a.txt 'unrelated 9.8765'
+art "$d" results/b.txt 'the value 0.4444 lives here'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+---
+Claim 0.4444 per `results/a.txt`.'
+runcal "$d"
+expect "declared-wrong detected"        "$(num 'declared-wrong')" "1"
+expect "one candidate file bucket"      "$(num '1-3 candidate files')" "1"
+
+# nowhere-in-repo: a derived number present in no artifact at all.
+d="$(newfix)"
+art "$d" results/a.txt 'numerator 0.1611 denominator 0.0377'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+---
+That is 4.27x worse, i.e. 4.2732 per `results/a.txt`.'
+runcal "$d"
+expect "derived number is nowhere"      "$(num 'nowhere-in-repo')" "1"
+expect "not called declared-wrong"      "$(num 'declared-wrong')" "0"
+expect "not called rounding-recoverable" "$(num 'rounding-recoverable')" "0"
+
+# a matched claim contributes no residue at all
+d="$(newfix)"
+art "$d" results/a.txt 'value 0.5555 exact'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+---
+Claim 0.5555 per `results/a.txt`.'
+runcal "$d"
+expect "matched claim leaves no residue" "$(num 'unmatched claims at best settings')" "0"
+
+# a hedged unmatched claim is excluded from the residue
+d="$(newfix)"
+art "$d" results/a.txt 'value 0.5555 exact'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+---
+Claim 0.5555 and roughly 0.9999 per `results/a.txt`.'
+runcal "$d"
+expect "hedged claim excluded from residue" "$(num 'unmatched claims at best settings')" "0"
+
+# table-line context is reported as an overlapping cross-cut, not a bucket
+d="$(newfix)"
+art "$d" results/a.txt 'nothing useful'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+---
+See `results/a.txt`:
+    alpha   0.7777'
+runcal "$d"
+expect "table-line residue flagged"  "$(num 'on a table/indented line')" "1"
+expect "and still bucketed once"     "$(num 'unmatched claims at best settings')" "1"
+
+# attribution context detected
+d="$(newfix)"
+art "$d" results/a.txt 'nothing useful'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+---
+This line first read 0.8888, which was corrected. See `results/a.txt`.'
+runcal "$d"
+expect "attribution sentence flagged" "$(num 'in an attribution/supersession sentence')" "1"
+
 echo
 echo "verify-calibration selftest: $pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1
