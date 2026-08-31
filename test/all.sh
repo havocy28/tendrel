@@ -15,7 +15,7 @@ for arg in "$@"; do
 done
 
 # Deterministic tier: fast, no model, safe for CI.
-deterministic=(checks.sh graph-lint.sh report-verbosity.sh backwards-compat.sh)
+deterministic=(checks.sh graph-lint.sh report-verbosity.sh backwards-compat.sh verify-calibration-selftest.sh)
 
 failed=()
 run(){
