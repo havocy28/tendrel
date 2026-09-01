@@ -73,6 +73,7 @@ status: complete
 question: "Does Sonnet zero-shot match PetBERT on disease NER?"
 config: {model: sonnet, dataset: peteval-ner, n: 500}
 result: "F1 0.87 vs PetBERT 0.84"
+provenance: [results/exp-012-ner.md]
 edges:
   - {rel: part_of, to: THEORY-002}
   - {rel: validates, to: DEC-003}
@@ -100,6 +101,12 @@ lines.
 Per-kind attributes (expected, not enforced): `experiment` → `question`, `config`;
 `theory` → `confidence` (low/moderate/high), `next_gate`; `pipeline_node` → optional `eval`.
 
+`provenance` (any kind, expected, not enforced): a flat list of repo-relative paths naming the
+artifacts the node's numbers come from, e.g. `provenance: [results/exp-012-ner.md]`. Declare it
+whenever a node states a precise figure. The lint checks that every declared path resolves; a
+git-ignored path (`raw/`, `work/`) is a warning rather than an error, because it vanishes from a
+clean checkout.
+
 **IDs** are human-readable, zero-padded, per-(project, kind): `EXP-001`, `THEORY-001`. To
 assign the next ID for a kind, glob `graph/<PREFIX>-*.md` and take max + 1. Reference nodes
 by ID in prose ("blocked on `NODE-003`") so the graph stays legible in conversation.
@@ -124,6 +131,13 @@ records the link; the content lives in the wiki file.
 - **Starting an experiment** → create `graph/EXP-<n>.md` (frontmatter: kind, question,
   config), status `running`. On finish → set `result` and status `complete`/`abandoned`,
   add edges: `part_of` the relevant theory, `validates`/`invalidated_by` any decision.
+- **Recording a number** (a `result`, a metric, a count in the body) → read the number out of
+  the artifact that produced it (the results file, table, or log on disk) rather than restating
+  it from conversation or memory, and name that artifact in `provenance:`. Transcription is where
+  drift enters: a node quoting `p=0.94` while its results file holds `0.9487862` is the failure
+  this prevents. If no artifact holds the number, say so in the body ("hand-computed", "reported
+  verbally") rather than lending it false precision. This is a write-time habit, never a prompt;
+  nothing here interrupts the user.
 - **A methodological choice** → a `decision` node with edges to the experiments that
   justify it. Reversing it → set the old one `reversed`, create the new one, add
   `supersedes` with a one-line reason.
@@ -176,11 +190,15 @@ When reconciling:
    work happens; the reconcile pass is a catch-up, not the only moment to write. When you rewrite
    a node that has edges, put each edge back in the flat one-line form (`- {rel: <relation>, to:
    <target>}`) so it stays readable; this quietly heals any edge that had drifted off-format,
-   without a separate pass.
+   without a separate pass. When a node you create or update carries a numeric `result` or a
+   precise figure in its body, copy it from the cited artifact and declare that artifact in
+   `provenance:` (see the logging section); never restate a number from conversation when the
+   file that produced it is on disk.
 2. **Friction:** if anything about the system was annoying — something you wanted to ask and
    couldn't, something hard to log, ceremony, strained traversal — append it to the tool-global
    friction log at `${CLAUDE_PLUGIN_DATA}/FRICTION.md` (resolves to
-   `~/.claude/plugins/data/research-graph-research-graph-local/FRICTION.md`). Tag each entry
+   `~/.claude/plugins/data/tendrel-tendrel/FRICTION.md` for a marketplace install; a legacy local
+   install used `research-graph-research-graph-local`). Tag each entry
    **confidently-wrong** (a reconcile or answer that was definitely incorrect — high priority,
    silent trust erosion) vs **incomplete** (a known gap — lower priority).
 3. Make only the reconcile edits, then return to the user — keep the reconcile output terse.
@@ -216,11 +234,12 @@ Two honesty rules for background mode:
 `/tendrel:lint` runs the deterministic `graph-lint.sh` over `graph/`. That script is read-only and
 authoritative for *detection*: it checks for dangling edges (a `to:` node ID or `wiki/` path that
 does not exist), an edge it cannot read (one not written in the flat one-line form), invalid
-`kind`/`status` values, duplicate IDs, `depends_on` cycles, and the key consistency rule, that a
-node which `depends_on` an `invalidated` (or already-`blocked`) node must itself be `blocked`. That
-rule cascades: because a blocked dependency also triggers it, invalidation must propagate all the
-way down a chain, not just one hop. It exits non-zero on errors; warnings (like an empty body) do
-not fail.
+`kind`/`status` values, duplicate IDs, `depends_on` cycles, the key consistency rule, that a
+node which `depends_on` an `invalidated` (or already-`blocked`) node must itself be `blocked`, and
+that every `provenance:` path resolves (a git-ignored path is a warning, not an error). The
+consistency rule cascades: because a blocked dependency also triggers it, invalidation must
+propagate all the way down a chain, not just one hop. It exits non-zero on errors; warnings (like
+an empty body) do not fail.
 
 When the lint reports **error**-severity violations, summarize them and **offer** to fix them; do
 not auto-fix. On the user's approval, repair through the normal reconcile behavior:
@@ -232,6 +251,9 @@ not auto-fix. On the user's approval, repair through the normal reconcile behavi
   recoverable from the graph alone.
 - unreadable edge: rewrite it in the flat one-line form (`- {rel: <relation>, to: <target>}`).
 - invalid `status` or `kind`: correct it to a valid value from the node model.
+- missing provenance path: ask the user which artifact was meant and re-point it, or remove the
+  entry if they confirm it; do not guess a path. A git-ignored path is only a warning; leave it
+  unless the user would rather cite a tracked artifact.
 
 After you apply an approved repair, **re-run `graph-lint.sh`** and report the result. Repair is
 model-driven and its quality is not deterministic, so the deterministic check is what confirms the
@@ -289,6 +311,24 @@ sections; it does not replace them.
 
 Before proposing what to try next, check open theories and unvalidated pipeline nodes so you
 don't re-run something already done.
+
+## Calibrate (on demand)
+
+`/tendrel:calibrate` runs the read-only `graph-calibrate.sh` over `graph/` and prints a
+measurement report: how many nodes assert precise numbers (two or more decimal places), how many
+declare `provenance:`, which cited artifacts resolve, and, for the nodes whose artifacts can be
+found, how often a node's numbers appear in them and how often they appear in an *unrelated*
+artifact by coincidence (the null test). It answers one question before anyone builds a
+number-checking gate for a graph: would such a check be trustworthy here? On the graph tendrel was
+calibrated against, a two-decimal figure matched an unrelated artifact 40.9% of the time, which is
+why the lint checks that provenance resolves and does not check the numbers themselves.
+
+Run it as `bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-calibrate.sh"` (if the variable is unset,
+locate the plugin's `scripts/graph-calibrate.sh`; it takes the repo root as its argument). Relay
+the report honoring `verbosity`, explaining the headline figures in plain language, and offer
+nothing to fix: it writes nothing and there is nothing to repair. If the user wants tendrel's
+maintainers to learn how a different kind of graph behaves, the friction log is the place to note
+the summary.
 
 ## Planning forward (next, on demand)
 

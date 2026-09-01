@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# Calibration harness for the tendrel:verify design (docs/plans/2026-08-29-2213-feat-verify-command-plan.md).
+# Calibration report for a tendrel research graph. Read-only: it never writes to graph/ or anywhere.
 #
-# Not a test. This measures a real graph so the plan's design parameters stop being assertions.
-# Two rounds of document review failed partly because every number in that plan was a one-shot hand
-# measurement that drifted between drafts. This script replaces them with one re-runnable fact.
-#
-# It reports COMPETING RULES side by side rather than picking one, because picking is the decision
-# the plan has to make and this is the evidence for it:
+# Not a lint and not a test. It measures how checkable the numbers in a graph are against the
+# artifacts they cite, so the question "would a number-verifying gate be trustworthy on THIS
+# graph?" is answered by a re-runnable fact instead of a hand measurement. It reports competing
+# rules side by side rather than picking one, because picking is the decision the evidence is for:
 #   - checked surface        result:-only  vs  whole-node
 #   - hedge scope            same-sentence vs  adjacent-token, with and without under/over
 #   - seed source            config:/Full record:  vs  + inline body paths
 #   - match rule             raw substring vs  boundary-anchored vs  + sci-notation canonicalized
+# Section 10 is the one to read first: how often a node's numbers pass against an artifact that
+# did NOT produce them. On the graph this was calibrated against, 40.9% of two-decimal claims
+# did, which is why tendrel checks that provenance resolves and does not check the numbers.
 #
-# Read-only. Never writes to the graph.
-# Usage: bash test/verify-calibration.sh [graph-root]     (default: current directory)
+# Section numbers are stable and cited elsewhere; add new sections at the end.
+# Usage: bash graph-calibrate.sh [repo-dir]     (default: current directory)
 set -uo pipefail
 ROOT="${1:-.}"
 
@@ -23,7 +24,7 @@ import os, re, sys, glob
 root = os.environ.get("ROOT", ".")
 graphdir = os.path.join(root, "graph")
 if not os.path.isdir(graphdir):
-    print("verify-calibration: no graph/ directory at %s; nothing to measure." % root)
+    print("graph-calibrate: no graph/ directory at %s; nothing to measure." % root)
     sys.exit(0)
 
 # ---------------------------------------------------------------- node parsing
@@ -178,10 +179,10 @@ wb = {n for n, c in whole_claims.items() if c}
 rb = {n for n, c in result_claims.items() if c}
 n_whole = sum(len(c) for c in whole_claims.values())
 
-print('verify-calibration: %s' % os.path.abspath(root))
+print('graph-calibrate: %s' % os.path.abspath(root))
 print('nodes: %d' % total_nodes)
 
-rule('1. CHECKED SURFACE  (KTD3)')
+rule('1. CHECKED SURFACE  (which text is scanned for numbers)')
 print('  claim-bearing nodes, whole-node rule   : %d' % len(wb))
 print('  claim-bearing nodes, result:-only rule : %d' % len(rb))
 print('  qualifying numbers, whole node         : %d' % n_whole)
@@ -193,7 +194,7 @@ print('  nodes containing any fenced block      : %d' % fenced)
 loose = sum(len(claims(nd['fm'] + nd['body'], CLAIM_LOOSE)) for nd in nodes.values())
 print('  identifier-glued numbers (version/param/filename): %d' % (loose - n_whole))
 
-rule('2. HEDGE RULE  (KTD3 escape hatch)')
+rule('2. HEDGE RULE  (when a stated number counts as approximate)')
 allt = {n: nd['fm'] + '\n' + nd['body'] for n, nd in nodes.items()}
 hs_full = sum(hedged_sentence(t, MARKERS_FULL) for t in allt.values())
 hs_trim = sum(hedged_sentence(t, MARKERS_TRIM) for t in allt.values())
@@ -208,7 +209,7 @@ print('  adjacent-token scope, no under/over    : %4d  %s' % (ha_trim, pct(ha_tr
 print('  --> fail-open gap (sentence - adjacent): %4d  %s' % (hs_full - ha_full, pct(hs_full - ha_full)))
 print('  numbers on table/indented lines (no sentence boundary): %d  %s' % (tbl, pct(tbl)))
 
-rule('3. SEED SOURCE  (U5 / OD3)')
+rule('3. SEED SOURCE  (where a node\'s artifact paths are read from)')
 seed_cfr, seed_body = {}, {}
 for name, nd in nodes.items():
     if name not in wb:
@@ -228,7 +229,7 @@ print('  seedable incl. inline body paths       : %d of %d claim-bearing' % (len
 print('  --> residual backlog, narrow source    : %d' % (len(wb) - len(seed_cfr)))
 print('  --> residual backlog, wide source      : %d' % (len(wb) - len(seed_body)))
 
-rule('4. MATCH RATE AFTER SEEDING  (KTD6 / KTD7 / reachability of strict)')
+rule('4. MATCH RATE AFTER SEEDING  (numbers found in their cited artifacts)')
 for label, src in (('narrow (config:/Full record:)', seed_cfr), ('wide (+ body paths)', seed_body)):
     for skip_scripts in (True, False):
         tot = un = 0
@@ -248,7 +249,7 @@ for label, src in (('narrow (config:/Full record:)', seed_cfr), ('wide (+ body p
         print('  %-30s scripts %-7s unmatched %4d/%-4d %s   clean nodes %d/%d'
               % (label, 'skipped' if skip_scripts else 'searched', un, tot, r, clean_nodes, len(src)))
 
-rule('5. MATCH RULE SENSITIVITY  (KTD6)')
+rule('5. MATCH RULE SENSITIVITY  (substring vs anchored vs canonicalized)')
 sample = [(n, c) for n, cs in whole_claims.items() for c in cs]
 for anchored, sci, lab in ((False, False, 'raw substring          '),
                            (True,  False, 'boundary-anchored      '),
@@ -261,14 +262,14 @@ for anchored, sci, lab in ((False, False, 'raw substring          '),
             hit += 1
     print('  %s  matched %d/%d' % (lab, hit, len(sample)))
 
-rule('6. ONE-DECIMAL PRESSURE  (KTD4 threshold)')
+rule('6. ONE-DECIMAL PRESSURE  (what a looser precision threshold would add)')
 od_whole = sum(len(ONE_DP.findall(nd['fm'] + '\n' + nd['body'])) for nd in nodes.values())
 od_result = sum(len(ONE_DP.findall(nd['result'])) for nd in nodes.values())
 od_nodes = sum(1 for nd in nodes.values() if ONE_DP.search(nd['fm'] + '\n' + nd['body']))
 print('  one-decimal numbers, whole node        : %d across %d nodes' % (od_whole, od_nodes))
 print('  one-decimal numbers, result: only      : %d' % od_result)
 
-rule('7. BACKLOG DEFINITIONS AND OVERLAP  (U3 calibration)')
+rule('7. BACKLOG DEFINITIONS AND OVERLAP  (nodes with numbers but no provenance)')
 declared = {n for n, nd in nodes.items() if re.search(r'^provenance:', nd['fm'], re.M)}
 verify_backlog = wb - declared
 crude = {n for n in wb if not [p for p in body_paths(nodes[n]['body']) + config_paths(nodes[n]['fm'])
@@ -279,7 +280,7 @@ print('  B. crude scan (claims, no resolving path)  : %d' % len(crude))
 print('  overlap |A n B|                            : %d' % len(verify_backlog & crude))
 print('  --> comparing |A| to |B| is only meaningful when the overlap is near the smaller set.')
 
-rule('8. ARTIFACT CORPUS  (KTD6 denominators)')
+rule('8. ARTIFACT CORPUS  (readable artifacts under results/, work/, meta/)')
 arts, sci_n = 0, 0
 for base in ('results', 'work', 'meta'):
     for dp, _, fns in os.walk(os.path.join(root, base)):
@@ -296,7 +297,7 @@ for base in ('results', 'work', 'meta'):
                 sci_n += 1
 print('  readable text artifacts                : %d' % arts)
 print('  ...using scientific notation           : %d' % sci_n)
-rule('9. UNMATCHED RESIDUE  (what R3 cannot check, and why)')
+rule('9. UNMATCHED RESIDUE  (numbers not found in their artifacts, and why)')
 # Every unmatched claim under the best measured settings (wide seed source, scripts searched,
 # adjacent-token hedging, anchored + sci matching) is classified mechanically. The buckets decide
 # whether R3 is fixable by better matching, by better declaration, or not at all.
@@ -425,11 +426,11 @@ print('    on a table/indented line                     : %4d  %s'
 print('    in an attribution/supersession sentence      : %4d  %s'
       % (cross['attributed'], share(cross['attributed'])))
 print()
-print('  --> rounding-recoverable is fixable by KTD6 alone.')
+print('  --> rounding-recoverable is fixable by precision-aware matching alone.')
 print('  --> declared-wrong is fixable by declaration or wider seeding.')
-print('  --> nowhere-in-repo is what R3 structurally cannot check.')
+print('  --> nowhere-in-repo is what no artifact check can reach.')
 
-rule('10. MATCHING PRECISION -- null test  (KTD6 rounding rule)')
+rule('10. MATCHING PRECISION -- null test  (passes against artifacts that did NOT produce the claim)')
 # The question a raw match rate cannot answer: how often does a claim pass against an artifact that
 # did NOT produce it? Each node's claims are tested against ANOTHER node's declared artifacts.
 names = sorted(seed_body)
@@ -470,7 +471,7 @@ for k in ('2dp', '3dp', '4dp+'):
 print()
 print('  --> a rounding match that clears a claim carries little provenance information.')
 
-rule('11. SUGGESTION PRECISION  (U2 candidate naming)')
+rule('11. SUGGESTION PRECISION  (would naming the file holding a number name the right file)')
 # For claims whose true source is known (they match exactly in one of the node's own declared
 # artifacts), would the candidate suggestion have named that artifact? Precision is measured at
 # each cap: fraction of NAMED files that are actually a true source.

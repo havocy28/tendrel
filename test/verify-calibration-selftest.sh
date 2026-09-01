@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Known-answer tests for test/verify-calibration.sh.
+# Known-answer tests for plugin/scripts/graph-calibrate.sh (the /tendrel:calibrate report).
 #
 # The calibration harness exists to stop the verify design being argued from hand measurements.
 # That only works if the harness itself is right, so every fixture here has an answer known by
@@ -7,7 +7,7 @@
 # same failure it was built to prevent, one level up.
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-CAL="$REPO/test/verify-calibration.sh"
+CAL="$REPO/plugin/scripts/graph-calibrate.sh"
 pass=0; fail=0
 ok(){ echo "PASS: $1"; pass=$((pass+1)); }
 no(){ echo "FAIL: $1"; [ -n "${2:-}" ] && echo "  $2"; fail=$((fail+1)); }
@@ -431,5 +431,5 @@ expect "cap 1 fires on the unique holder"  "$(echo "$capline" | grep -oE 'fires 
 expect "cap 1 precision is 100%"           "$(echo "$capline" | grep -oE 'precision +[0-9.]+%' | grep -oE '[0-9.]+')" "100.0"
 
 echo
-echo "verify-calibration selftest: $pass passed, $fail failed"
+echo "graph-calibrate selftest: $pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1

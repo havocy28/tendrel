@@ -51,6 +51,25 @@ PetEVAL gold standard?"* reads that page instead of re-reading the source. A gra
 at a wiki page with an edge (`{rel: motivated_by, to: wiki/peteval.md}`) when it rests on that
 background knowledge.
 
+## Say where a number came from
+
+When you log a result, the agent should read the figure out of the file that produced it and cite
+that file, not restate what you said in chat:
+
+> "EXP-012 finished; the metrics are in `results/exp-012-ner.md`."
+
+The node gets `provenance: [results/exp-012-ner.md]` and the number as the file holds it. If you
+later see `p=0.94` in a node while the results file says `0.9487862`, that is the drift this
+prevents. `/tendrel:lint` errors on a provenance path that does not resolve.
+
+## Check whether your numbers are checkable
+
+`/tendrel:calibrate` measures your graph: how many nodes assert precise numbers, how many cite an
+artifact, and how often a figure could be found in its artifact versus in an unrelated one by
+chance. It writes nothing. Run it if you are wondering whether a stricter number-checking gate
+would mean anything for your kind of graph; on the graph tendrel was calibrated against, it would
+not (yet).
+
 ## Read the status view
 
 `/tendrel:status` regenerates `status.md`: a mermaid diagram of the graph (dependency arrows,

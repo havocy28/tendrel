@@ -1,5 +1,5 @@
 ---
-description: Lint the research graph. Runs a deterministic integrity check over graph/ (dangling edges, invalid kinds/statuses, duplicate IDs, cycles, invalidation consistency) and offers to fix any violations.
+description: Lint the research graph. Runs a deterministic integrity check over graph/ (dangling edges, invalid kinds/statuses, duplicate IDs, cycles, invalidation consistency, provenance paths that don't resolve) and offers to fix any violations.
 ---
 
 # Lint the research graph

@@ -56,6 +56,21 @@ for f in plugin/skills/research-graph/SKILL.md plugin/commands/next.md; do
     || no "next trace-footer header present in $f" "SKILL, command, and test/next-integration.sh must name the footer identically"
 done
 
+# 3d. provenance + calibrate contracts survive edits. The write-side sentence is the whole point of
+#     the provenance feature (numbers come from artifacts, not transcription); the calibrate command
+#     and its script must exist together, or the skill section points at nothing.
+grep -qF 'read the number out of' plugin/skills/research-graph/SKILL.md \
+  && ok "provenance write-side contract present in SKILL.md" \
+  || no "provenance write-side contract present in SKILL.md" "the 'read the number out of the artifact' sentence is load-bearing"
+grep -q 'provenance' plugin/skills/research-graph/SKILL.md && grep -q 'provenance' plugin/commands/lint.md \
+  && ok "provenance named in SKILL.md and lint.md" || no "provenance named in SKILL.md and lint.md"
+{ [ -f plugin/commands/calibrate.md ] && grep -q '^description:' plugin/commands/calibrate.md; } \
+  && ok "calibrate.md exists with a description" || no "calibrate.md exists with a description"
+[ -f plugin/scripts/graph-calibrate.sh ] && ok "graph-calibrate.sh shipped in plugin/scripts" \
+  || no "graph-calibrate.sh shipped in plugin/scripts"
+grep -q '^## Calibrate' plugin/skills/research-graph/SKILL.md && grep -q 'tendrel:calibrate' README.md \
+  && ok "Calibrate section in SKILL.md and README row" || no "Calibrate section in SKILL.md and README row"
+
 # 4. no em dashes in user-facing docs and commands (SKILL.md and spike fixtures excluded:
 #    SKILL.md carries known pre-existing em dashes).
 #    Only TRACKED docs are scanned. docs/plans/ is gitignored working material, and walking the

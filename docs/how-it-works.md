@@ -58,8 +58,8 @@ behind at session open, that's your cue to reconcile.
 `/tendrel:lint` runs a deterministic, read-only script (`plugin/scripts/graph-lint.sh`) over
 `graph/`. This is a deliberate split: **detection is a script, repair is the model.** Integrity is
 load-bearing, so detection is deterministic and never subject to a reasoning lapse; the script
-flags dangling edges, invalid kinds or statuses, duplicate IDs, `depends_on` cycles, and the
-invalidation-consistency rule. That rule is transitive: a node that `depends_on` an `invalidated`
+flags dangling edges, invalid kinds or statuses, duplicate IDs, `depends_on` cycles, `provenance:`
+paths that do not resolve, and the invalidation-consistency rule. That rule is transitive: a node that `depends_on` an `invalidated`
 (or already-`blocked`) node must itself be `blocked`, so an invalidation that only propagated one
 level down a chain still fails the check. It exits non-zero on errors and never writes to `graph/`.
 
@@ -68,6 +68,22 @@ violations, Claude summarizes them and offers to fix them through the same recon
 uses everywhere else; it writes only after you approve, and then re-runs the lint so the
 deterministic check confirms the fix held. The script is safe to wire into CI as a
 gate, since a broken graph fails the run while advisory warnings do not.
+
+## Provenance and calibration
+
+A node can declare `provenance:`, a flat list of repo-relative paths naming the artifacts its
+numbers come from. The lint checks that each path resolves (a git-ignored path is a warning, since
+it vanishes from a clean checkout), and the skill asks the agent to read a number out of the
+artifact that produced it rather than restating it from conversation, because transcription is
+where numbers drift.
+
+What tendrel deliberately does *not* do is check that the numbers match. On the 107-node graph this
+was calibrated against, a two-decimal figure matched an unrelated artifact 40.9% of the time, so a
+matching check would pass for the wrong reasons and nobody reading it could tell.
+`/tendrel:calibrate` reports those rates for your own graph: how many nodes assert precise numbers,
+how many declare provenance, how often a figure is found in its cited artifact, and how often it
+would match an unrelated one by coincidence. It is read-only and exists so that decision can be
+made on evidence from more than one graph.
 
 ## status.md
 
