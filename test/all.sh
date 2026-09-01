@@ -38,6 +38,7 @@ if [ "$run_contracts" -eq 1 ]; then
   run background-integration.sh
   run reconcile-autonomy-integration.sh
   run next-integration.sh
+  run provenance-integration.sh
 fi
 
 echo "==================================="
