@@ -1,7 +1,7 @@
 ---
 title: Test agent-behavior contracts empirically; fire-and-forget backgrounds, propose-and-approve does not
 date: 2026-07-07
-last_updated: 2026-07-13
+last_updated: 2026-09-01
 type: design-learning
 tags: [claude-code, plugin, subagents, background-execution, testing, headless, markdown-contract]
 status: resolved
@@ -44,6 +44,11 @@ a subagent for status, seed, and reconcile," the model will comply. A single spo
 3. **Give the harness a real fail path.** A "measure and print" script that always exits 0 is not a
    gate. Assert the must-pass invariants (the default/opt-out path does NOT dispatch; the promoted
    operation DOES) and exit non-zero on violation, so the harness can actually catch a regression.
+   Necessary but not sufficient: a harness with real invariants and a non-zero exit can still pass
+   for the wrong reason when its detector is loose or the rule it measures matches coincidentally.
+   Also run the measurement where the answer is known to be no, and give the harness's own
+   detectors known-answer self-checks; see
+   [null-test-heuristics-before-shipping](null-test-heuristics-before-shipping.md).
 
 ## Why this matters
 
@@ -69,6 +74,14 @@ Especially before promoting the behavior in the README, docs, or CHANGELOG.
 - Related: [stop-hook-vs-interactive-skills](stop-hook-vs-interactive-skills.md), the same theme:
   agent-runtime behavior needs empirical validation. The Stop-hook mechanism was spike-validated
   before anything was built on it, and its per-turn firing flaw only showed up in real use.
+- Related: [null-test-heuristics-before-shipping](null-test-heuristics-before-shipping.md), the
+  missing half of guidance point 3: an N-run rate with real invariants can still pass
+  coincidentally; the null test bounds what the rate can claim. Its write-side provenance contract
+  is measured with exactly this doc's harness pattern (`test/provenance-integration.sh`, N-run
+  rates, hard versus rate-based assertions, detector self-checks).
+- Related: [gates-must-read-the-same-in-every-environment](gates-must-read-the-same-in-every-environment.md),
+  the same trust argument applied to a gate's inputs rather than its rate: a gate red on exactly
+  one machine is a gate people learn to ignore.
 
 ## Update 2026-07-13: headless `claude -p` does not fire SessionStart hooks
 

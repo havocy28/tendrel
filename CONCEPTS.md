@@ -27,5 +27,8 @@ The deterministic, read-only integrity check over the graph: dangling edges, unr
 ### Calibration report
 The read-only measurement of how checkable a graph's numbers are against the artifacts they cite: how many nodes carry claims, how many declare provenance, how often a claim is found in its cited artifacts, and how often it would be found in an unrelated artifact by coincidence (the null test). It exists so the decision to build a number-matching check rests on evidence from more than one graph.
 
+### Background execution
+The opt-in mode that runs the status scan in a dispatched subagent so it stays out of the main transcript. Off by default per repository. Only work whose result the user does not need to see mid-flight is dispatched; proposal-producing operations stay inline because their output must come back to the user anyway. It isolates context, not wall-clock time.
+
 ### Friction log
 The tool-global file where the agent records what was hard or wrong about using the graph during a reconcile, tagged as confidently-wrong (a definite error, high priority) or incomplete (a known gap). It is the maintainer's demand signal.
