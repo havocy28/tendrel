@@ -12,11 +12,16 @@ Run the read-only calibration report and explain it, following the **research-gr
    this context, locate the tendrel plugin's `scripts/graph-calibrate.sh` in the plugin install
    directory and run it with the repo root as its argument. The script is read-only; it writes
    nothing, anywhere.
-2. Relay the report honoring `verbosity`. Under `succinct`, give the four headline figures only:
-   nodes asserting precise numbers (section 1), nodes declaring `provenance:` (section 7), the share
-   of numbers found in their cited artifact (section 4), and the coincidental pass rate against
-   unrelated artifacts (section 10). Under `normal`, add one plain-language sentence per figure on
-   what it means for this graph.
+2. Relay the report honoring `verbosity`. Under `succinct`, give the four headline figures only,
+   read from these exact lines:
+   - nodes asserting precise numbers: section 1, the `claim-bearing nodes, whole-node rule` line;
+   - nodes declaring provenance: section 3, the `nodes declaring provenance: paths` line;
+   - numbers checkable against their artifacts: section 4, the `wide (+ body paths)` row with
+     `scripts searched`. It prints `unmatched N/M`; report it as "N of M numbers not found in their
+     cited artifacts" (or 100 minus the percentage, as a found rate), never as a found count;
+   - coincidence: section 10, the `combined coincidental pass rate` line, plus the `2dp` row,
+     which is the rate for two-decimal figures.
+   Under `normal`, add one plain-language sentence per figure on what it means for this graph.
 3. Offer nothing to fix. A low provenance count is an invitation to declare `provenance:` as nodes
    are next touched, not an error; `/tendrel:lint` is where declared paths get checked.
 4. If the user asks whether tendrel should check the numbers themselves on this graph: a

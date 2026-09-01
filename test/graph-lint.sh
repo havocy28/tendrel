@@ -424,6 +424,61 @@ runlint "$d"
   && ok "git-ignored provenance path -> warning only, exit 0 (present and absent alike)" \
   || no "git-ignored provenance path" "rc=$RC out=$OUT"
 
+# 24b. a present-but-untracked path is a WARNING (it will be missing in every clone); a committed
+#      path is silent; a per-machine ignore rule (core.excludesFile) does NOT count as ignored, so
+#      the same missing path is an ERROR here exactly as it would be in CI.
+d="$(newfix)"; mkdir -p "$d/results"; : > "$d/results/tracked.md"; : > "$d/results/loose.md"
+(cd "$d" && git init -q && git add results/tracked.md && git -c user.email=t@t -c user.name=t commit -qm init)
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+provenance: [results/tracked.md, results/loose.md]
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "OBS-001: provenance path results/loose.md exists but is not tracked by git" \
+  && ! echo "$OUT" | grep -q "results/tracked.md"; } \
+  && ok "untracked present path -> warning, tracked path silent" || no "untracked present path" "rc=$RC out=$OUT"
+excl="$(mktemp)"; printf 'gone/\n' > "$excl"
+node "$d" OBS-002.md '---
+id: OBS-002
+kind: observation
+provenance: [gone/absent.csv]
+---
+Body.'
+OUT="$(cd "$d" && git config core.excludesFile "$excl" && bash "$LINT" "$d" 2>&1)"; RC=$?
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "OBS-002: provenance path gone/absent.csv does not exist"; } \
+  && ok "per-machine excludesFile rule does not downgrade a missing path to a warning" \
+  || no "per-machine excludesFile" "rc=$RC out=$OUT"
+
+# 24c. tolerant key match and inline-form edge cases: `provenance :` still reads; a trailing YAML
+#      comment is not part of the path; an unterminated list is a readable error, not a bogus path.
+d="$(newfix)"; mkdir -p "$d/results"; : > "$d/results/a.md"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+provenance : [results/a.md]  # from run 3
+---
+Body.'
+node "$d" OBS-002.md '---
+id: OBS-002
+kind: observation
+provenance: [results/missing.md
+---
+Body.'
+node "$d" OBS-003.md '---
+id: OBS-003
+kind: observation
+provenance : [results/nope.md]
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && ! echo "$OUT" | grep -q "OBS-001" \
+  && echo "$OUT" | grep -q "OBS-002: couldn't read provenance" \
+  && echo "$OUT" | grep -q "OBS-003: provenance path results/nope.md does not exist"; } \
+  && ok "spaced colon reads, trailing comment dropped, unterminated list is a readable error" \
+  || no "provenance parse edge cases" "rc=$RC out=$OUT"
+
 # 25. no provenance key -> the check is silent (graphs that never declare provenance are untouched)
 d="$(newfix)"
 node "$d" OBS-001.md '---

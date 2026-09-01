@@ -102,8 +102,10 @@ Per-kind attributes (expected, not enforced): `experiment` → `question`, `conf
 `theory` → `confidence` (low/moderate/high), `next_gate`; `pipeline_node` → optional `eval`.
 
 `provenance` (any kind, expected, not enforced): a flat list of repo-relative paths naming the
-artifacts the node's numbers come from, e.g. `provenance: [results/exp-012-ner.md]`. Declare it
-whenever a node states a precise figure. The lint checks that every declared path resolves; a
+artifacts the node's numbers come from, e.g. `provenance: [results/exp-012-ner.md]`. Write the
+inline list form; the lint also reads a bare scalar and a block list (one `- path` per line, like
+`edges:`), so a hand-edited node in either form still gets checked. Declare it whenever a node
+states a precise figure. The lint checks that every declared path resolves; a
 git-ignored path (`raw/`, `work/`) is a warning rather than an error, because it vanishes from a
 clean checkout.
 
@@ -314,7 +316,9 @@ don't re-run something already done.
 
 ## Calibrate (on demand)
 
-`/tendrel:calibrate` runs the read-only `graph-calibrate.sh` over `graph/` and prints a
+`/tendrel:calibrate` (and natural language: "are my numbers checkable?", "calibrate the graph",
+"could tendrel verify the figures in this graph?") runs the read-only `graph-calibrate.sh` over
+`graph/` and prints a
 measurement report: how many nodes assert precise numbers (two or more decimal places), how many
 declare `provenance:`, which cited artifacts resolve, and, for the nodes whose artifacts can be
 found, how often a node's numbers appear in them and how often they appear in an *unrelated*
@@ -325,8 +329,9 @@ why the lint checks that provenance resolves and does not check the numbers them
 
 Run it as `bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-calibrate.sh"` (if the variable is unset,
 locate the plugin's `scripts/graph-calibrate.sh`; it takes the repo root as its argument). Relay
-the report honoring `verbosity`, explaining the headline figures in plain language, and offer
-nothing to fix: it writes nothing and there is nothing to repair. If the user wants tendrel's
+the report honoring `verbosity`, explaining the headline figures in plain language (the command
+file names the exact lines to read; section 4 prints *unmatched* counts, so never relay one as a
+found count), and offer nothing to fix: it writes nothing and there is nothing to repair. If the user wants tendrel's
 maintainers to learn how a different kind of graph behaves, the friction log is the place to note
 the summary.
 

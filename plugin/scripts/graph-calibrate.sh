@@ -126,6 +126,35 @@ def fullrecord_paths(body):
 def body_paths(body):
     return PATH_RX.findall(body)
 
+def provenance_paths(fm):
+    """Paths declared under the `provenance:` key, the same three forms graph-lint reads (inline
+    list, block list, bare scalar). Declared paths are not filtered by PATH_RX: the point of the
+    key is that the author named the artifact, wherever it lives."""
+    paths, lines = [], fm.split('\n')
+    def clean(x):
+        return re.sub(r'\s+#.*$', '', x).strip().strip('"\'')
+    for i, ln in enumerate(lines):
+        m = re.match(r'^provenance\s*:\s*(.*)$', ln)
+        if not m:
+            continue
+        val = m.group(1).strip()
+        if val.startswith('['):
+            end = val.rfind(']')
+            paths += [clean(x) for x in val[1:end if end >= 0 else None].split(',') if clean(x)]
+        elif val:
+            v = clean(val)
+            if v and v not in ('null', '~'):
+                paths.append(v)
+        else:
+            for nxt in lines[i + 1:]:
+                if re.match(r'^\S', nxt):
+                    break
+                mm = re.match(r'^\s*-\s*(.+?)\s*$', nxt)
+                if mm and clean(mm.group(1)):
+                    paths.append(clean(mm.group(1)))
+        break
+    return paths
+
 def resolves(p):
     return os.path.exists(os.path.join(root, p))
 
@@ -214,17 +243,20 @@ seed_cfr, seed_body = {}, {}
 for name, nd in nodes.items():
     if name not in wb:
         continue
-    a = [p for p in config_paths(nd['fm']) + fullrecord_paths(nd['body']) if resolves(p)]
+    a = [p for p in provenance_paths(nd['fm']) + config_paths(nd['fm']) + fullrecord_paths(nd['body'])
+         if resolves(p)]
     b = [p for p in body_paths(nd['body']) if resolves(p)]
     if a: seed_cfr[name] = sorted(set(a))
     if a or b: seed_body[name] = sorted(set(a + b))
 n_cfg_key = sum(1 for nd in nodes.values() if re.search(r'^config:', nd['fm'], re.M))
 n_cfg_path = sum(1 for nd in nodes.values() if config_paths(nd['fm']))
 n_fr = sum(1 for nd in nodes.values() if fullrecord_paths(nd['body']))
+n_prov = sum(1 for nd in nodes.values() if provenance_paths(nd['fm']))
+print('  nodes declaring provenance: paths      : %d' % n_prov)
 print('  nodes carrying a config: key           : %d' % n_cfg_key)
 print('  ...whose config: actually names a path : %d' % n_cfg_path)
 print('  nodes carrying a "Full record:" path   : %d' % n_fr)
-print('  seedable from config:/Full record:     : %d of %d claim-bearing' % (len(seed_cfr), len(wb)))
+print('  seedable from provenance:/config:/Full record: : %d of %d claim-bearing' % (len(seed_cfr), len(wb)))
 print('  seedable incl. inline body paths       : %d of %d claim-bearing' % (len(seed_body), len(wb)))
 print('  --> residual backlog, narrow source    : %d' % (len(wb) - len(seed_cfr)))
 print('  --> residual backlog, wide source      : %d' % (len(wb) - len(seed_body)))
@@ -270,10 +302,10 @@ print('  one-decimal numbers, whole node        : %d across %d nodes' % (od_whol
 print('  one-decimal numbers, result: only      : %d' % od_result)
 
 rule('7. BACKLOG DEFINITIONS AND OVERLAP  (nodes with numbers but no provenance)')
-declared = {n for n, nd in nodes.items() if re.search(r'^provenance:', nd['fm'], re.M)}
+declared = {n for n, nd in nodes.items() if re.search(r'^provenance\s*:', nd['fm'], re.M)}
 verify_backlog = wb - declared
 crude = {n for n in wb if not [p for p in body_paths(nodes[n]['body']) + config_paths(nodes[n]['fm'])
-                               if resolves(p)]}
+                               + provenance_paths(nodes[n]['fm']) if resolves(p)]}
 print('  nodes declaring provenance:            : %d' % len(declared))
 print('  A. verify backlog (claims, no provenance:) : %d' % len(verify_backlog))
 print('  B. crude scan (claims, no resolving path)  : %d' % len(crude))

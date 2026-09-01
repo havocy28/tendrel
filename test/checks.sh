@@ -78,7 +78,9 @@ grep -q '^## Calibrate' plugin/skills/research-graph/SKILL.md && grep -q 'tendre
 #    while CI -- which checks out a clean tree with no docs/plans/ -- stayed green. A gate that is
 #    red only on developer machines is a gate people learn to ignore.
 emd=0
-docfiles="$(git ls-files -- 'docs/*.md' 2>/dev/null | grep -v '/spike-fixtures/' || true)"
+#    Tracked plus untracked-but-not-ignored, so a doc written this session is scanned before it is
+#    committed (otherwise the gate is green locally and red after the commit lands in CI).
+docfiles="$(git ls-files --cached --others --exclude-standard -- 'docs/*.md' 2>/dev/null | grep -v '/spike-fixtures/' || true)"
 for f in README.md CHANGELOG.md plugin/commands/*.md $docfiles; do
   [ -f "$f" ] || continue
   if grep -q "—" "$f"; then echo "  em dash in $f"; emd=1; fi

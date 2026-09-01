@@ -14,7 +14,14 @@
 #   2. WRITES (hard): at least one run must write EXP-003, or the contract was never observable.
 #   3. PROVENANCE (hard, rate): of the runs that wrote, at least one must declare `provenance:`
 #      naming the artifact. Markdown contracts comply at a rate, not always; fail only on zero.
-#   4. ARTIFACT PRECISION (informational): how many written nodes hold 0.7412 rather than 0.74.
+#   4. ARTIFACT PRECISION (hard, rate): of the runs that wrote, at least one must hold 0.7412,
+#      the artifact's figure, rather than the 0.74 narrated in chat. This is the only signal that
+#      the file was actually read: the prompt names the artifact, so a provenance line can be
+#      produced by echoing the prompt. Measured 2026-09-01, N=5: writes 5/5, provenance 5/5,
+#      artifact-precise 5/5.
+#
+# Both detectors read FRONTMATTER only (PROV) or the whole node (PRECISE), and are covered by
+# deterministic self-checks below so the harness cannot false-pass on its own regex.
 #
 # Same headless caveat as the other contract harnesses: `claude -p` does not fire SessionStart
 # hooks, so this measures the skill-activation path only.
@@ -67,10 +74,39 @@ run_once(){ # $1=dir -> prints "RUN:ERR" or "WRITES:<0|1> PROV:<0|1> PRECISE:<0|
   after=$(md5sum "$dir/graph/EXP-003.md")
   if [ "$before" = "$after" ]; then echo "WRITES:0 PROV:0 PRECISE:0"; return; fi
   node=$(cat "$dir/graph/EXP-003.md")
-  prov=0; printf '%s' "$node" | grep -qE '^provenance:.*results/exp-003-reranker\.md|^\s*-\s*results/exp-003-reranker\.md' && prov=1
-  precise=0; printf '%s' "$node" | grep -q '0\.7412' && precise=1
-  echo "WRITES:1 PROV:$prov PRECISE:$precise"
+  echo "WRITES:1 PROV:$(detect_prov "$node") PRECISE:$(detect_precise "$node")"
 }
+
+# Detectors. PROV looks only inside the frontmatter and only at the provenance key, in the inline
+# form (`provenance: [.., results/x.md, ..]`), the scalar form, or the block form (`- results/x.md`
+# lines directly under a bare `provenance:` line). A body bullet naming the file is not a
+# declaration and must not count.
+detect_prov(){ # $1=node text -> 0|1
+  printf '%s\n' "$1" | awk '
+    NR==1 && /^---$/ {fm=1; next}
+    fm && /^---$/ {exit}
+    !fm {next}
+    /^provenance[ \t]*:/ { inblock=0
+      if ($0 ~ /results\/exp-003-reranker\.md/) {hit=1}
+      else if ($0 ~ /^provenance[ \t]*:[ \t]*$/) {inblock=1}
+      next }
+    inblock && /^[ \t]+-[ \t]*results\/exp-003-reranker\.md/ {hit=1}
+    inblock && /^[^ \t]/ {inblock=0}
+    END {print (hit ? 1 : 0)}'
+}
+detect_precise(){ printf '%s' "$1" | grep -q '0\.7412' && echo 1 || echo 0; }
+
+# Deterministic self-checks: the harness's own detectors, on nodes with a known answer. A wrong
+# detector would otherwise be measured as an agent behavior.
+sc_fail=0
+sc(){ [ "$2" = "$3" ] && echo "  selfcheck ok: $1" || { echo "  selfcheck FAIL: $1 (got $2, want $3)"; sc_fail=1; }; }
+sc "inline provenance -> PROV 1" "$(detect_prov $'---\nid: EXP-003\nprovenance: [results/exp-003-reranker.md]\n---\nbody')" 1
+sc "block provenance -> PROV 1" "$(detect_prov $'---\nid: EXP-003\nprovenance:\n  - results/exp-003-reranker.md\nedges:\n  - {rel: part_of, to: THEORY-001}\n---\nbody')" 1
+sc "body bullet only -> PROV 0" "$(detect_prov $'---\nid: EXP-003\nresult: \"0.74\"\n---\n- results/exp-003-reranker.md')" 0
+sc "other key naming the file -> PROV 0" "$(detect_prov $'---\nid: EXP-003\nconfig: {source: results/exp-003-reranker.md}\n---\nbody')" 0
+sc "artifact figure -> PRECISE 1" "$(detect_precise $'---\nresult: \"nDCG@10 0.7412\"\n---')" 1
+sc "rounded figure -> PRECISE 0" "$(detect_precise $'---\nresult: \"nDCG@10 0.74\"\n---')" 0
+[ "$sc_fail" -eq 0 ] || { echo "detector self-checks failed; the measurement would be meaningless."; exit 1; }
 
 w=0; p=0; x=0; e=0
 echo "== provenance contract: rounded figures in chat, precise figures on disk, N=$N =="
@@ -88,5 +124,6 @@ fail=0
 if [ "$e" -gt 0 ]; then echo "  FAIL: $e/$N runs errored; the measurement is incomplete and certifies nothing."; fail=1; fi
 if [ "$e" -eq 0 ] && [ "$w" -eq 0 ]; then echo "  FAIL: no run wrote EXP-003; the contract was never observable."; fail=1; fi
 if [ "$w" -gt 0 ] && [ "$p" -eq 0 ]; then echo "  FAIL: nodes were written but none declared provenance; the contract does not trigger."; fail=1; fi
-echo "Targets: provenance declared in >0 writes (hard); artifact-precise figure is informational."
+if [ "$w" -gt 0 ] && [ "$x" -eq 0 ]; then echo "  FAIL: nodes were written but none holds the artifact's figure 0.7412; numbers were transcribed from chat."; fail=1; fi
+echo "Targets: provenance declared in >0 writes (hard); artifact-precise figure in >0 writes (hard)."
 [ "$fail" -eq 0 ]

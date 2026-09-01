@@ -64,7 +64,7 @@ prevents. `/tendrel:lint` errors on a provenance path that does not resolve.
 
 ## Check whether your numbers are checkable
 
-`/tendrel:calibrate` measures your graph: how many nodes assert precise numbers, how many cite an
+`/tendrel:calibrate` (or "are my numbers checkable?") measures your graph: how many nodes assert precise numbers, how many cite an
 artifact, and how often a figure could be found in its artifact versus in an unrelated one by
 chance. It writes nothing. Run it if you are wondering whether a stricter number-checking gate
 would mean anything for your kind of graph; on the graph tendrel was calibrated against, it would

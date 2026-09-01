@@ -54,34 +54,56 @@ def provenance_paths(fm):
     as a single path. Returns [] when the key is absent, so graphs that never declare provenance
     are untouched by the check."""
     paths, lines = [], fm.splitlines()
+    def clean(x):
+        return re.sub(r"\s+#.*$", "", x).strip().strip('"\'')   # drop a trailing YAML comment
     for i, ln in enumerate(lines):
-        m = re.match(r"^provenance:\s*(.*)$", ln)
+        # Tolerate a space before the colon: the edge regex once silently skipped `rel :`, and a
+        # skipped key here would mean a broken citation lints clean.
+        m = re.match(r"^provenance\s*:\s*(.*)$", ln)
         if not m:
             continue
         val = m.group(1).strip()
         if val.startswith("["):
-            paths += [x.strip().strip('"\'') for x in val.strip("[]").split(",") if x.strip()]
+            end = val.rfind("]")
+            if end < 0:
+                return [f"?unterminated list: {val}"]     # surfaced as an unreadable value below
+            paths += [clean(x) for x in val[1:end].split(",") if clean(x)]
         elif val:
-            paths.append(val.strip('"\''))
+            v = clean(val)
+            if v and v not in ("null", "~"):
+                paths.append(v)
         else:
             for nxt in lines[i + 1:]:
                 if re.match(r"^\S", nxt):      # next top-level key ends the block
                     break
                 mm = re.match(r"^\s*-\s*(.+?)\s*$", nxt)
-                if mm:
-                    paths.append(mm.group(1).strip('"\''))
+                if mm and clean(mm.group(1)):
+                    paths.append(clean(mm.group(1)))
         break
     return paths
 
-def git_ignored(rel):
-    """True when git would ignore `rel` under root. Outside a git repo (exit 128) or without git
-    at all, nothing is ignored and the plain existence check decides."""
+def git_status(rel):
+    """How git sees `rel` under root: "ignored" (matched by a .gitignore committed in the repo),
+    "untracked" (present on disk but not tracked), "tracked", or "nogit" (no git, no repo).
+    Only repo .gitignore files count as ignore sources: core.excludesFile and .git/info/exclude
+    are per-machine, and a rule that lives on one machine would make the lint read differently
+    there than in a clean checkout, which is the property this check exists to keep."""
     try:
-        r = subprocess.run(["git", "-C", root, "check-ignore", "-q", "--", rel],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return r.returncode == 0
+        r = subprocess.run(["git", "-C", root, "check-ignore", "-v", "--non-matching", "--", rel],
+                           capture_output=True, text=True)
     except OSError:
-        return False
+        return "nogit"
+    if r.returncode == 128:
+        return "nogit"
+    src = r.stdout.split(":", 1)[0].strip() if r.stdout else ""
+    if r.returncode == 0 and src and not os.path.isabs(src) and os.path.basename(src) == ".gitignore":
+        return "ignored"
+    try:
+        t = subprocess.run(["git", "-C", root, "ls-files", "--error-unmatch", "--", rel],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return "nogit"
+    return "tracked" if t.returncode == 0 else "untracked"
 
 errors, warnings = [], []
 nodes = {}          # id -> record (last-wins for lookups; duplicates flagged separately)
@@ -168,14 +190,24 @@ for nid, rec in nodes.items():
 # something that is not there.
 for nid, rec in nodes.items():
     for p in rec["provenance"]:
+        if p.startswith("?unterminated list:"):
+            errors.append(f"{nid}: couldn't read provenance in graph/{rec['file']}. "
+                          "Write it as a closed inline list, e.g.  provenance: [results/a.md]")
+            continue
         if os.path.isabs(p) or os.path.normpath(p).split(os.sep)[0] == "..":
             errors.append(f"{nid}: provenance path '{p}' must be repo-relative "
                           "(no absolute paths, no '..')")
-        elif git_ignored(p):
+            continue
+        status = git_status(p)
+        exists = os.path.exists(os.path.join(root, p))
+        if status == "ignored":
             warnings.append(f"{nid}: provenance path {p} is ignored by git; it resolves here "
                             "but not from a clean checkout")
-        elif not os.path.exists(os.path.join(root, p)):
+        elif not exists:
             errors.append(f"{nid}: provenance path {p} does not exist")
+        elif status == "untracked":
+            warnings.append(f"{nid}: provenance path {p} exists but is not tracked by git; "
+                            "a clean checkout will report it missing")
 
 # depends_on cycle detection (the pipeline is meant to be a DAG)
 adj = {nid: [to for rel, to in rec["edges"] if rel == "depends_on" and to in nodes]

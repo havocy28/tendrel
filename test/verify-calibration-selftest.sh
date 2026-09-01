@@ -131,10 +131,30 @@ Claim 0.3333 as recorded in `results/c.txt` inline.'
 runcal "$d"
 expect "config: path counted"            "$(num "whose config: actually names a path")" "1"
 expect "Full record: path counted"       "$(num 'nodes carrying a "Full record:" path')" "1"
-expect "narrow source seeds 2 of 3"      "$(num 'seedable from config:/Full record:')" "2"
+expect "narrow source seeds 2 of 3"      "$(num 'seedable from provenance:/config:/Full record:')" "2"
 expect "wide source seeds 3 of 3"        "$(num 'seedable incl. inline body paths')" "3"
 expect "narrow residual is 1"            "$(num 'residual backlog, narrow source')" "1"
 expect "wide residual is 0"              "$(num 'residual backlog, wide source')" "0"
+
+# a node whose ONLY citation is provenance: (the key this release introduces) is seedable in the
+# narrow tier, and its claim matches inside the declared artifact even though the artifact lives
+# outside the PATH_RX directory prefixes (out/ is not results/).
+d="$(newfix)"
+art "$d" out/run7.txt 'auc 0.8123'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+result: "auc 0.8123"
+provenance: [out/run7.txt]
+---
+No inline path here.'
+runcal "$d"
+expect "provenance-only node counted as declaring" "$(num 'nodes declaring provenance: paths')" "1"
+expect "provenance-only node seeds the narrow tier" "$(num 'seedable from provenance:/config:/Full record:')" "1"
+expect "provenance-only node seeds the wide tier"   "$(num 'seedable incl. inline body paths')" "1"
+{ echo "$OUT" | grep -m1 'narrow (config:/Full record:) *scripts searched' | grep -q 'unmatched *0/1'; } \
+  && ok "claim found in the provenance-declared artifact" || no "provenance artifact searched" "$OUT"
 
 # a cited path that does not resolve must not count as seedable
 d="$(newfix)"

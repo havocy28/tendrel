@@ -3,6 +3,42 @@
 All notable changes to tendrel. Versions follow semver. The self-hosted marketplace serves the
 default branch, so the latest tagged version is what installs pull on `/plugin marketplace update`.
 
+## 0.8.0 - 2026-09-01
+
+### Added
+- **Provenance in the node model.** Any node can declare `provenance:`, a flat list of repo-relative
+  paths naming the artifacts its numbers come from (`provenance: [results/exp-012-ner.md]`). The
+  lint checks that every declared path resolves: a missing path is an error, a git-ignored path
+  (`raw/`, `work/`) is a warning because it vanishes from a clean checkout, and an absent key is
+  silent, so graphs that never declare provenance are untouched.
+- **Numbers come from artifacts, not transcription.** The skill's logging section and reconcile
+  sweep now say: when recording a number, read it out of the artifact that produced it and name
+  that artifact in `provenance:`. This is the highest-value change in the release and it is not a
+  command. The motivating failure was a node quoting `p=0.94` while its results file held
+  `0.9487862`; that is a transcription error, and prevention beats detection. `test/checks.sh`
+  pins the sentence; `test/provenance-integration.sh` measures it headlessly (opt-in tier).
+  Measured 2026-09-01, N=5: wrote the node 5/5, declared provenance 5/5, recorded the
+  artifact's precise figure rather than the rounded one narrated in chat 5/5.
+- **Calibrate (`/tendrel:calibrate`).** A read-only report on how checkable a graph's numbers are
+  against the artifacts they cite: nodes asserting precise figures, nodes declaring provenance,
+  how often a figure is found in its cited artifact, and how often it would match an unrelated
+  artifact by coincidence (the null test). On the 107-node graph it was calibrated against, a
+  two-decimal figure matched an unrelated artifact 40.9% of the time, which is why tendrel checks
+  that provenance resolves and deliberately does not check the numbers themselves. Covered by 52
+  known-answer fixtures in the deterministic test tier.
+
+### Fixed
+- `test/checks.sh` scanned gitignored `docs/plans/` for em dashes, so the gate was red only on
+  developer machines holding a plan and green in CI. It now scans tracked docs only.
+- The friction-log path noted in the skill pointed at a legacy local-install namespace; a
+  marketplace install writes to `plugins/data/tendrel-tendrel/FRICTION.md`.
+
+### Compatibility
+- Fully backwards compatible and additive. A new optional frontmatter key, one new lint check that
+  is silent when the key is absent, one new read-only command, and skill wording that changes how
+  numbers are written, never whether anything writes. The backwards-compat sweep and every
+  existing fixture pass unchanged.
+
 ## 0.7.0 - 2026-07-17
 
 ### Added
