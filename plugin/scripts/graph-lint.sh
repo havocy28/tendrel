@@ -3,11 +3,13 @@
 # Usage: bash graph-lint.sh [repo-dir]   (default: current directory)
 # Exits non-zero when any ERROR-severity violation exists. WARNINGS print but do not fail,
 # so this is safe as a CI gate (a broken graph fails; an advisory nudge does not).
+# Checks: dangling edges, unreadable edges, invalid kind/status, duplicate IDs, depends_on cycles,
+# transitive invalidation consistency, and that every `provenance:` path a node declares resolves.
 set -uo pipefail
 ROOT="${1:-.}"
 
 ROOT="$ROOT" python3 <<'PY'
-import os, sys, glob, re
+import os, sys, glob, re, subprocess
 
 root = os.environ.get("ROOT", ".")
 graphdir = os.path.join(root, "graph")
@@ -45,6 +47,42 @@ def declared_edges(fm):
             count += 1
     return count
 
+def provenance_paths(fm):
+    """Read the `provenance:` key: a flat list of repo-relative paths naming the artifacts a node's
+    numbers come from. Accepts the inline form (`provenance: [results/a.md, results/b.tsv]`), the
+    block form (one `- path` per line under the key), and a bare scalar (`provenance: results/a.md`)
+    as a single path. Returns [] when the key is absent, so graphs that never declare provenance
+    are untouched by the check."""
+    paths, lines = [], fm.splitlines()
+    for i, ln in enumerate(lines):
+        m = re.match(r"^provenance:\s*(.*)$", ln)
+        if not m:
+            continue
+        val = m.group(1).strip()
+        if val.startswith("["):
+            paths += [x.strip().strip('"\'') for x in val.strip("[]").split(",") if x.strip()]
+        elif val:
+            paths.append(val.strip('"\''))
+        else:
+            for nxt in lines[i + 1:]:
+                if re.match(r"^\S", nxt):      # next top-level key ends the block
+                    break
+                mm = re.match(r"^\s*-\s*(.+?)\s*$", nxt)
+                if mm:
+                    paths.append(mm.group(1).strip('"\''))
+        break
+    return paths
+
+def git_ignored(rel):
+    """True when git would ignore `rel` under root. Outside a git repo (exit 128) or without git
+    at all, nothing is ignored and the plain existence check decides."""
+    try:
+        r = subprocess.run(["git", "-C", root, "check-ignore", "-q", "--", rel],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return r.returncode == 0
+    except OSError:
+        return False
+
 errors, warnings = [], []
 nodes = {}          # id -> record (last-wins for lookups; duplicates flagged separately)
 id_files = {}       # id -> [files]
@@ -70,7 +108,7 @@ for path in sorted(glob.glob(os.path.join(graphdir, "*.md"))):
     edges = re.findall(r"rel\s*:\s*([a-z_]+).*?\bto\s*:\s*([^\s},]+)", fm)
     id_files.setdefault(nid, []).append(name)
     nodes[nid] = {"file": name, "fm": fm, "kind": f("kind"), "status": f("status"),
-                  "body": body.strip(), "edges": edges}
+                  "body": body.strip(), "edges": edges, "provenance": provenance_paths(fm)}
 
 # duplicate ids
 for nid, files in id_files.items():
@@ -121,6 +159,23 @@ for nid, rec in nodes.items():
                 dep_status = nodes[to]["status"]
                 errors.append(f"{nid}: depends_on {dep_status} node {to} but is not blocked "
                               f"(status '{rec['status'] or 'none'}')")
+
+# provenance checks: every artifact a node declares must resolve on disk. Deterministic and
+# read-only, the same shape as the wiki/ edge check above. A path git ignores (raw/, work/, data
+# dumps) is a WARNING, not an error: it resolves on the machine that produced it and vanishes from
+# a clean checkout, so an error would turn the lint red in exactly one environment, which is the
+# kind of gate people learn to ignore. Missing and not ignored is an error: the node cites
+# something that is not there.
+for nid, rec in nodes.items():
+    for p in rec["provenance"]:
+        if os.path.isabs(p) or os.path.normpath(p).split(os.sep)[0] == "..":
+            errors.append(f"{nid}: provenance path '{p}' must be repo-relative "
+                          "(no absolute paths, no '..')")
+        elif git_ignored(p):
+            warnings.append(f"{nid}: provenance path {p} is ignored by git; it resolves here "
+                            "but not from a clean checkout")
+        elif not os.path.exists(os.path.join(root, p)):
+            errors.append(f"{nid}: provenance path {p} does not exist")
 
 # depends_on cycle detection (the pipeline is meant to be a DAG)
 adj = {nid: [to for rel, to in rec["edges"] if rel == "depends_on" and to in nodes]

@@ -368,5 +368,96 @@ runlint "$d"
 { [ "$RC" -eq 1 ] && echo "$OUT" | grep -qE "depends_on cycle: NODE-00[12] -> NODE-00[12] -> NODE-00[12]"; } \
   && ok "cycle reported as ordered path" || no "cycle ordered path" "rc=$RC out=$OUT"
 
+# 22. provenance (inline list form): every declared path resolves -> clean, exit 0
+d="$(newfix)"; mkdir -p "$d/results"; : > "$d/results/a.md"; : > "$d/results/b.tsv"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "q?"
+result: "F1 0.8731"
+provenance: [results/a.md, results/b.tsv]
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "provenance"; } \
+  && ok "provenance inline list, all resolve -> clean" || no "provenance inline resolves" "rc=$RC out=$OUT"
+
+# 23. provenance (block form): one path missing -> error naming the path, exit 1.
+#     The fixture is not a git repo, so this also proves the plain existence check decides when
+#     `git check-ignore` cannot run (exit 128 is "not ignored", never "ignored").
+d="$(newfix)"; mkdir -p "$d/results"; : > "$d/results/a.md"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "q?"
+provenance:
+  - results/a.md
+  - results/missing.md
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "EXP-001: provenance path results/missing.md does not exist" \
+  && ! echo "$OUT" | grep -q "results/a.md"; } \
+  && ok "provenance block list, missing path -> error, resolving sibling silent" || no "provenance missing path" "rc=$RC out=$OUT"
+
+# 24. a git-ignored provenance path is a WARNING, not an error, whether or not it exists locally:
+#     the check must read the same on the developer machine and in a clean CI checkout.
+d="$(newfix)"; (cd "$d" && git init -q && printf 'raw/\n' > .gitignore); mkdir -p "$d/raw"; : > "$d/raw/present.csv"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+provenance: [raw/present.csv]
+---
+Body.'
+node "$d" OBS-002.md '---
+id: OBS-002
+kind: observation
+provenance: [raw/absent.csv]
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "OBS-001: provenance path raw/present.csv is ignored by git" \
+  && echo "$OUT" | grep -q "OBS-002: provenance path raw/absent.csv is ignored by git" \
+  && ! echo "$OUT" | grep -q "does not exist"; } \
+  && ok "git-ignored provenance path -> warning only, exit 0 (present and absent alike)" \
+  || no "git-ignored provenance path" "rc=$RC out=$OUT"
+
+# 25. no provenance key -> the check is silent (graphs that never declare provenance are untouched)
+d="$(newfix)"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -qi "provenance"; } \
+  && ok "absent provenance key -> silent" || no "absent provenance key" "rc=$RC out=$OUT"
+
+# 26. bare scalar form reads as a single path
+d="$(newfix)"; mkdir -p "$d/results"; : > "$d/results/one.md"
+node "$d" DEC-001.md '---
+id: DEC-001
+kind: decision
+status: active
+provenance: results/one.md
+---
+Body.'
+runlint "$d"
+[ "$RC" -eq 0 ] && ok "provenance bare scalar resolves" || no "provenance bare scalar" "rc=$RC out=$OUT"
+
+# 27. absolute or parent-escaping paths are rejected as not repo-relative
+d="$(newfix)"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+provenance: [/etc/hostname, ../outside.md]
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && [ "$(echo "$OUT" | grep -c "must be repo-relative")" -eq 2 ]; } \
+  && ok "absolute and ../ provenance paths -> error" || no "non-relative provenance paths" "rc=$RC out=$OUT"
+
 echo "---"; echo "graph-lint test: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]
