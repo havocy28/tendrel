@@ -518,7 +518,7 @@ runlint "$d"
 { [ "$RC" -eq 1 ] && [ "$(echo "$OUT" | grep -c "must be repo-relative")" -eq 2 ]; } \
   && ok "absolute and ../ provenance paths -> error" || no "non-relative provenance paths" "rc=$RC out=$OUT"
 
-# 28. reversed invalidated_by pair (AE1): each node claims the other invalidated it. Direction carries
+# 28. reversed invalidated_by pair: each node claims the other invalidated it. Direction carries
 #     the meaning, so one edge is wrong -> exactly one error naming both nodes and the relation, exit 1
 d="$(newfix)"
 node "$d" DEC-010.md '---
@@ -570,7 +570,7 @@ runlint "$d"
   && ok "reversed supersedes and part_of on the same pair -> two errors, one per relation" \
   || no "two relations reversed on one pair" "rc=$RC out=$OUT"
 
-# 30. different relations in opposite directions (AE2): A supersedes B, B part_of A -> no pair error, exit 0
+# 30. different relations in opposite directions: A supersedes B, B part_of A -> no pair error, exit 0
 d="$(newfix)"
 node "$d" OBS-018.md '---
 id: OBS-018
@@ -680,7 +680,7 @@ runlint "$d"
 { [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "mutual"; } \
   && ok "three-node part_of ring -> no pair error (pairwise only)" || no "part_of ring" "rc=$RC out=$OUT"
 
-# 35. repo-relative edge target (AE3, tracked arm): a committed docs/plans/x.md is silent, exit 0, and
+# 35. repo-relative edge target: a committed docs/plans/x.md is silent, exit 0, and
 #     nothing in the output mentions the edge; the retired "unrecognized" warning never appears
 d="$(newfix)"; mkdir -p "$d/docs/plans"; : > "$d/docs/plans/x.md"
 (cd "$d" && git init -q && git add docs/plans/x.md && git -c user.email=t@t -c user.name=t commit -qm init)
@@ -698,7 +698,7 @@ runlint "$d"
   && ok "tracked repo-relative edge target -> silent, exit 0, no 'unrecognized'" \
   || no "tracked edge target" "rc=$RC out=$OUT"
 
-# 36. repo-relative edge target (AE3, ignored arm): a path matched by the repo .gitignore is silent
+# 36. repo-relative edge target: a path matched by the repo .gitignore is silent
 #     whether or not it exists locally. A link to a private plan document is legitimate and permanent,
 #     so unlike provenance there is no warning here: a nudge nobody can act on is the hygiene problem
 #     this check replaces.
@@ -723,7 +723,7 @@ runlint "$d"
 { [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "docs/plans"; } \
   && ok "git-ignored edge target -> silent, present and absent alike" || no "git-ignored edge target" "rc=$RC out=$OUT"
 
-# 37. repo-relative edge target (AE3, missing arm): not ignored and not on disk -> error naming the
+# 37. repo-relative edge target: not ignored and not on disk -> error naming the
 #     path and both readings of the target, exit 1
 d="$(newfix)"; (cd "$d" && git init -q)
 node "$d" THEORY-001.md '---
@@ -907,7 +907,7 @@ runlint "$d"
 { [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "NODE-A"; } \
   && ok "edge to an existing off-pattern node ID is silent" || no "off-pattern existing node target" "rc=$RC out=$OUT"
 
-# 46. --explain (AE4): NODE-008 validates DEC-002, whose first body line is a plain sentence -> one
+# 46. --explain: NODE-008 validates DEC-002, whose first body line is a plain sentence -> one
 #     line per edge of the named node in the form SRC rel TARGET "summary", then the normal report,
 #     exit 0. DEC-002 carries an edge of its own so the scope is shown to exclude it. The fixture is
 #     reused by cases 54 and 56.
@@ -938,8 +938,8 @@ Proceedings adapter.'
 runexplain "$ae4" NODE-008
 { [ "$RC" -eq 0 ] && echo "$OUT" | grep -qF 'NODE-008 validates DEC-002 "Conference proceedings first, behind a pluggable document adapter"' \
   && echo "$OUT" | grep -q '^EXPLAIN (1 edges):$' && ! echo "$OUT" | grep -q 'DEC-002 motivated_by'; } \
-  && ok "--explain NODE-008 (AE4) -> SRC rel TARGET \"first body line\", scoped to the named node" \
-  || no "--explain AE4" "rc=$RC out=$OUT"
+  && ok "--explain NODE-008 -> SRC rel TARGET \"first body line\", scoped to the named node" \
+  || no "--explain scoped" "rc=$RC out=$OUT"
 
 # 47. --explain: a first body line that is a markdown heading is rendered verbatim, no stripping
 d="$(newfix)"
@@ -1169,7 +1169,7 @@ b="$(bash "$LINT" --explain "$ae4" NODE-008 2>&1)"; brc=$?
 line='NODE-008 validates DEC-002 "Conference proceedings first, behind a pluggable document adapter"'
 { [ "$arc" -eq 0 ] && [ "$brc" -eq 0 ] && echo "$a" | grep -qF "$line" && echo "$b" | grep -qF "$line" \
   && echo "$a" | grep -q '^EXPLAIN (1 edges):$' && echo "$b" | grep -q '^EXPLAIN (1 edges):$'; } \
-  && ok "--explain grammar: ID with implicit root and with explicit root both render the AE4 line" \
+  && ok "--explain grammar: ID with implicit root and with explicit root both render the same line" \
   || no "--explain grammar, ID forms" "arc=$arc a=$a brc=$brc b=$b"
 c="$(bash "$LINT" --explain "$ae4" 2>&1)"; crc=$?
 e="$(cd "$ae4" && bash "$LINT" --explain 2>&1)"; erc=$?

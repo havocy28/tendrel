@@ -26,7 +26,7 @@ else
 fi
 
 ROOT="$ROOT" EXPLAIN="$EXPLAIN" EXPLAIN_IDS="$EXPLAIN_IDS" python3 <<'PY'
-import os, sys, glob, re, subprocess
+import os, sys, glob, re, subprocess, functools
 
 root = os.environ.get("ROOT", ".")
 graphdir = os.path.join(root, "graph")
@@ -102,6 +102,12 @@ def provenance_paths(fm):
         break
     return paths
 
+def escapes_repo(rel):
+    """True for an absolute path or one that climbs above the repo root; every path check below
+    rejects those before touching the filesystem."""
+    return os.path.isabs(rel) or os.path.normpath(rel).split(os.sep)[0] == ".."
+
+@functools.lru_cache(maxsize=None)
 def git_status(rel):
     """How git sees `rel` under root: "ignored" (matched by a .gitignore committed in the repo),
     "untracked" (present on disk but not tracked), "tracked", or "nogit" (no git, no repo).
@@ -124,6 +130,12 @@ def git_status(rel):
     except OSError:
         return "nogit"
     return "tracked" if t.returncode == 0 else "untracked"
+
+def target_state(rel):
+    """How git sees a repo-relative path, and whether it is on disk. The edge-target and provenance
+    loops map this pair to different outcomes on purpose (an ignored edge target is silent, an
+    ignored provenance path warns), so only the lookup is shared."""
+    return git_status(rel), os.path.exists(os.path.join(root, rel))
 
 errors, warnings = [], []
 nodes = {}          # id -> record (last-wins for lookups; duplicates flagged separately)
@@ -158,6 +170,7 @@ for path in sorted(glob.glob(os.path.join(graphdir, "*.md"))):
 
 SUMMARY_WIDTH = 80
 
+@functools.lru_cache(maxsize=None)
 def edge_summary(to):
     """What --explain prints beside an edge target: the first non-blank line of the thing the edge
     points at, so a wrong target reads wrong at a glance. A node target (the quote-stripped `to`
@@ -169,15 +182,16 @@ def edge_summary(to):
     line. Deterministic and read-only: the same graph always renders the same lines."""
     if to in nodes:
         text = nodes[to]["body"]
-    elif os.path.isabs(to) or os.path.normpath(to).split(os.sep)[0] == "..":
+    elif escapes_repo(to):
         return "(missing)"
     else:
         path = os.path.join(root, to)
-        if os.path.isdir(path):
+        try:
+            text = open(path, encoding="utf-8", errors="replace").read()
+        except IsADirectoryError:
             return "(directory)"
-        if not os.path.isfile(path):
+        except OSError:
             return "(missing)"
-        text = open(path, encoding="utf-8", errors="replace").read()
         if "\x00" in text:
             return "(binary file)"
         m = FM_RE.match(text)
@@ -234,12 +248,11 @@ for nid, rec in nodes.items():
         if NODE_RE.match(to) or to in nodes:
             if to not in nodes:
                 errors.append(f"{nid}: dangling {rel} edge to missing node {to}")
-        elif os.path.isabs(to) or os.path.normpath(to).split(os.sep)[0] == "..":
+        elif escapes_repo(to):
             errors.append(f"{nid}: {rel} edge target '{to}' must be repo-relative "
                           "(no absolute paths, no '..')")
         else:
-            status = git_status(to)
-            exists = os.path.exists(os.path.join(root, to))
+            status, exists = target_state(to)
             if status != "ignored" and not exists:
                 errors.append(f"{nid}: {rel} edge target {to}: no node with this ID and no such file")
             elif status == "untracked":
@@ -268,12 +281,11 @@ for nid, rec in nodes.items():
             errors.append(f"{nid}: couldn't read provenance in graph/{rec['file']}. "
                           "Write it as a closed inline list, e.g.  provenance: [results/a.md]")
             continue
-        if os.path.isabs(p) or os.path.normpath(p).split(os.sep)[0] == "..":
+        if escapes_repo(p):
             errors.append(f"{nid}: provenance path '{p}' must be repo-relative "
                           "(no absolute paths, no '..')")
             continue
-        status = git_status(p)
-        exists = os.path.exists(os.path.join(root, p))
+        status, exists = target_state(p)
         if status == "ignored":
             warnings.append(f"{nid}: provenance path {p} is ignored by git; it resolves here "
                             "but not from a clean checkout")
