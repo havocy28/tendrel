@@ -11,6 +11,8 @@ skill** (`skills/research-graph/SKILL.md`) as the source of truth for how reconc
 2. Create or update nodes, transition statuses, and add edges so the graph matches reality:
    experiments moving to `complete`/`abandoned` with results, pipeline nodes changing evidence
    status, new `depends_on`/`validates`/`invalidated_by` edges, ideas and observations captured.
+   After writing edges, review them through the lint's `--explain` rendering, per the skill's
+   reconcile section.
 3. If a `pipeline_node` became `invalidated`, trace downstream and report what is now affected.
 4. Append any friction about the system to the tool-global friction log
    (`${CLAUDE_PLUGIN_DATA}/FRICTION.md`), tagged **confidently-wrong** vs **incomplete**.
