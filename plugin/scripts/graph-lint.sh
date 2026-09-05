@@ -1,20 +1,37 @@
 #!/usr/bin/env bash
 # Deterministic graph-integrity lint for tendrel. Read-only: it never writes to graph/.
-# Usage: bash graph-lint.sh [repo-dir]   (default: current directory)
-# Exits non-zero when any ERROR-severity violation exists. WARNINGS print but do not fail,
+# Usage: bash graph-lint.sh [--explain] [repo-dir] [NODE-ID ...]   (default: current directory)
+# With --explain, every edge of the named nodes (all nodes when none are named) prints first, one
+# line each as `SRC rel TARGET "summary"`, where the summary is the first line of whatever the edge
+# points at, so a wrong target reads wrong at a glance; the normal report and exit code follow,
+# unchanged. Exits non-zero when any ERROR-severity violation exists. WARNINGS print but do not fail,
 # so this is safe as a CI gate (a broken graph fails; an advisory nudge does not).
 # Checks: dangling edges (a target is a node ID or a repo-relative path, and either must resolve),
 # unreadable edges, invalid kind/status, duplicate IDs, depends_on cycles, mutual or
 # self-referencing invalidated_by/supersedes/part_of edges, transitive invalidation consistency,
 # and that every `provenance:` path a node declares resolves.
 set -uo pipefail
-ROOT="${1:-.}"
+# `--explain` is the only flag and is consumed first. After it, the first argument is the repo dir
+# only when it names an existing directory; otherwise every argument is a node ID and the repo dir
+# stays `.`, so `cd repo && graph-lint.sh --explain NODE-008` works without naming the root. Without
+# the flag the one optional positional is the repo dir, exactly as before.
+EXPLAIN=0; EXPLAIN_IDS=""
+if [ "${1:-}" = "--explain" ]; then
+  EXPLAIN=1; shift
+  ROOT="."
+  if [ $# -gt 0 ] && [ -d "$1" ]; then ROOT="$1"; shift; fi
+  EXPLAIN_IDS="$*"
+else
+  ROOT="${1:-.}"
+fi
 
-ROOT="$ROOT" python3 <<'PY'
+ROOT="$ROOT" EXPLAIN="$EXPLAIN" EXPLAIN_IDS="$EXPLAIN_IDS" python3 <<'PY'
 import os, sys, glob, re, subprocess
 
 root = os.environ.get("ROOT", ".")
 graphdir = os.path.join(root, "graph")
+explain = os.environ.get("EXPLAIN") == "1"
+explain_ids = list(dict.fromkeys(os.environ.get("EXPLAIN_IDS", "").split()))   # scope, in given order
 
 if not os.path.isdir(graphdir):
     print("graph-lint: no graph/ directory here; repo is not scaffolded for tendrel. Nothing to lint.")
@@ -33,6 +50,7 @@ STATUS = {
     "observation":   set(),
 }
 NODE_RE = re.compile(r"^[A-Z]+-\d+$")
+FM_RE = re.compile(r"^---\n(.*?)\n---\n?(.*)$", re.S)   # frontmatter fences, then the body
 
 def declared_edges(fm):
     """Count the list items under an `edges:` key (block-style: one `- ` per edge). Used to tell
@@ -114,7 +132,7 @@ id_files = {}       # id -> [files]
 for path in sorted(glob.glob(os.path.join(graphdir, "*.md"))):
     name = os.path.basename(path)
     text = open(path, encoding="utf-8", errors="replace").read()
-    m = re.match(r"^---\n(.*?)\n---\n?(.*)$", text, re.S)
+    m = FM_RE.match(text)
     if not m:
         errors.append(f"{name}: malformed frontmatter (missing '---' fences)")
         continue
@@ -137,6 +155,38 @@ for path in sorted(glob.glob(os.path.join(graphdir, "*.md"))):
     id_files.setdefault(nid, []).append(name)
     nodes[nid] = {"file": name, "fm": fm, "kind": f("kind"), "status": f("status"),
                   "body": body.strip(), "edges": edges, "provenance": provenance_paths(fm)}
+
+SUMMARY_WIDTH = 80
+
+def edge_summary(to):
+    """What --explain prints beside an edge target: the first non-blank line of the thing the edge
+    points at, so a wrong target reads wrong at a glance. A node target (the quote-stripped `to`
+    the loop above resolved) gives its first body line; a repo-relative file gives its first
+    non-blank line after any leading frontmatter block, read with the same fence rule as a node.
+    `(empty body)` when there is no such line, `(missing)` when the target is neither a node nor a
+    file the lint would accept (absolute and `..` paths included, so this never reads outside the
+    repo). Cut at SUMMARY_WIDTH characters with a trailing `...` so a long first paragraph stays one
+    line. Deterministic and read-only: the same graph always renders the same lines."""
+    if to in nodes:
+        text = nodes[to]["body"]
+    elif os.path.isabs(to) or os.path.normpath(to).split(os.sep)[0] == "..":
+        return "(missing)"
+    else:
+        path = os.path.join(root, to)
+        if os.path.isdir(path):
+            return "(directory)"
+        if not os.path.isfile(path):
+            return "(missing)"
+        text = open(path, encoding="utf-8", errors="replace").read()
+        if "\x00" in text:
+            return "(binary file)"
+        m = FM_RE.match(text)
+        if m:
+            text = m.group(2)
+    line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    if not line:
+        return "(empty body)"
+    return line[:SUMMARY_WIDTH] + "..." if len(line) > SUMMARY_WIDTH else line
 
 # duplicate ids
 for nid, files in id_files.items():
@@ -292,6 +342,22 @@ for cyc in found:
         continue
     seen.add(key)
     errors.append("depends_on cycle: " + " -> ".join(cyc))
+
+# explain: one line per edge with the summary of its target, printed before the report so the
+# report keeps its shape for callers that grep it. Rendering only: nothing here appends to errors
+# or warnings, and the exit code below is what it would be without the flag. Source nodes come in
+# file order, the same order `nodes` was built in; with a scope, only the named nodes' edges print.
+# A named ID that is not a node gets one note and is skipped, so a typo in the scope is visible
+# instead of rendering nothing and looking like a node without edges.
+if explain:
+    notes = [f"  (no node {i})" for i in explain_ids if i not in nodes]
+    lines = [f'  {nid} {rel} {to} "{edge_summary(to)}"'
+             for nid, rec in nodes.items() if not explain_ids or nid in explain_ids
+             for rel, to in rec["edges"]]
+    print(f"EXPLAIN ({len(lines)} edges):")
+    for ln in notes + lines:
+        print(ln)
+    print()
 
 # report
 print(f"graph-lint: {len(nodes)} node(s) in {graphdir}")

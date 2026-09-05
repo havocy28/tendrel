@@ -9,6 +9,7 @@ no(){ echo "FAIL: $1"; [ -n "${2:-}" ] && echo "  $2"; fail=$((fail+1)); }
 newfix(){ local d; d="$(mktemp -d)"; mkdir -p "$d/graph"; echo "$d"; }
 node(){ printf '%s\n' "$3" > "$1/graph/$2"; }
 runlint(){ OUT="$(bash "$LINT" "$1" 2>&1)"; RC=$?; }
+runexplain(){ OUT="$(bash "$LINT" --explain "$@" 2>&1)"; RC=$?; }
 
 # 1. clean valid graph
 d="$(newfix)"
@@ -905,6 +906,279 @@ Body.'
 runlint "$d"
 { [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "NODE-A"; } \
   && ok "edge to an existing off-pattern node ID is silent" || no "off-pattern existing node target" "rc=$RC out=$OUT"
+
+# 46. --explain (AE4): NODE-008 validates DEC-002, whose first body line is a plain sentence -> one
+#     line per edge of the named node in the form SRC rel TARGET "summary", then the normal report,
+#     exit 0. DEC-002 carries an edge of its own so the scope is shown to exclude it. The fixture is
+#     reused by cases 54 and 56.
+ae4="$(newfix)"
+node "$ae4" OBS-001.md '---
+id: OBS-001
+kind: observation
+---
+Reviewers asked for proceedings coverage.'
+node "$ae4" DEC-002.md '---
+id: DEC-002
+kind: decision
+status: active
+edges:
+  - {rel: motivated_by, to: OBS-001}
+---
+Conference proceedings first, behind a pluggable document adapter
+
+Rationale follows.'
+node "$ae4" NODE-008.md '---
+id: NODE-008
+kind: pipeline_node
+status: validated
+edges:
+  - {rel: validates, to: DEC-002}
+---
+Proceedings adapter.'
+runexplain "$ae4" NODE-008
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -qF 'NODE-008 validates DEC-002 "Conference proceedings first, behind a pluggable document adapter"' \
+  && echo "$OUT" | grep -q '^EXPLAIN (1 edges):$' && ! echo "$OUT" | grep -q 'DEC-002 motivated_by'; } \
+  && ok "--explain NODE-008 (AE4) -> SRC rel TARGET \"first body line\", scoped to the named node" \
+  || no "--explain AE4" "rc=$RC out=$OUT"
+
+# 47. --explain: a first body line that is a markdown heading is rendered verbatim, no stripping
+d="$(newfix)"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "q?"
+---
+## Result
+
+Hybrid wins.'
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: validated
+edges:
+  - {rel: validates, to: EXP-001}
+---
+Body.'
+runexplain "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -qF 'NODE-001 validates EXP-001 "## Result"'; } \
+  && ok "--explain: heading first line rendered verbatim" || no "--explain heading" "rc=$RC out=$OUT"
+
+# 48. --explain: a first body line that is a table row is rendered verbatim
+d="$(newfix)"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "q?"
+---
+| a | b |
+|---|---|
+| 1 | 2 |'
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: validated
+edges:
+  - {rel: validates, to: EXP-001}
+---
+Body.'
+runexplain "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -qF 'NODE-001 validates EXP-001 "| a | b |"'; } \
+  && ok "--explain: table-row first line rendered verbatim" || no "--explain table row" "rc=$RC out=$OUT"
+
+# 49. --explain: a 200-character first line is cut to exactly 80 characters plus `...` (the closing
+#     quote in the expected string pins the length: an 81st character would break the match)
+d="$(newfix)"
+long="$(printf 'x%.0s' $(seq 1 200))"
+node "$d" OBS-001.md "---
+id: OBS-001
+kind: observation
+---
+$long"
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: validated
+edges:
+  - {rel: motivated_by, to: OBS-001}
+---
+Body.'
+want="$(printf 'x%.0s' $(seq 1 80))..."
+runexplain "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -qF "NODE-001 motivated_by OBS-001 \"$want\""; } \
+  && ok "--explain: 200-character first line -> 80 characters plus ..." || no "--explain truncation" "rc=$RC out=$OUT"
+
+# 50. --explain: an empty body renders as (empty body); the existing empty-body warning is unchanged
+d="$(newfix)"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+---'
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: validated
+edges:
+  - {rel: motivated_by, to: OBS-001}
+---
+Body.'
+runexplain "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -qF 'NODE-001 motivated_by OBS-001 "(empty body)"' \
+  && echo "$OUT" | grep -q "OBS-001: empty body (claimed but unlogged)"; } \
+  && ok "--explain: empty body -> (empty body), warning unchanged" || no "--explain empty body" "rc=$RC out=$OUT"
+
+# 51. --explain: a file target whose content opens with a frontmatter block renders the first
+#     non-blank line after the closing fence, and the tracked path stays silent in the report
+d="$(newfix)"; mkdir -p "$d/wiki"
+printf -- '---\ntitle: Chunking\ntags: [notes]\n---\n\n# Chunking notes\n\nMore text.\n' > "$d/wiki/x.md"
+(cd "$d" && git init -q && git add wiki/x.md && git -c user.email=t@t -c user.name=t commit -qm init)
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: validated
+edges:
+  - {rel: motivated_by, to: wiki/x.md}
+---
+Body.'
+runexplain "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -qF 'NODE-001 motivated_by wiki/x.md "# Chunking notes"' \
+  && [ "$(echo "$OUT" | grep -c 'wiki/x.md')" -eq 1 ]; } \
+  && ok "--explain: file target with frontmatter -> first line after the fence" \
+  || no "--explain file target frontmatter" "rc=$RC out=$OUT"
+
+# 52. --explain: a missing target (path or node ID) renders as (missing) AND the missing-target
+#     errors are still reported, exit 1: explain is rendering only, never a substitute for the check
+d="$(newfix)"
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: motivated_by, to: docs/gone.md}
+  - {rel: depends_on, to: NODE-999}
+---
+Body.'
+runexplain "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -qF 'NODE-001 motivated_by docs/gone.md "(missing)"' \
+  && echo "$OUT" | grep -qF 'NODE-001 depends_on NODE-999 "(missing)"' \
+  && echo "$OUT" | grep -q "NODE-001: motivated_by edge target docs/gone.md: no node with this ID and no such file" \
+  && echo "$OUT" | grep -q "NODE-001: dangling depends_on edge to missing node NODE-999"; } \
+  && ok "--explain: missing targets -> (missing), errors still reported, exit 1" \
+  || no "--explain missing target" "rc=$RC out=$OUT"
+
+# 53. --explain scope: two named IDs render only their edges; an ID that is not a node prints one
+#     (no node ...) line and the other edges still render; the count in the header is of rendered edges
+d="$(newfix)"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "q?"
+---
+Result line.'
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: validated
+edges:
+  - {rel: validates, to: EXP-001}
+---
+First.'
+node "$d" NODE-002.md '---
+id: NODE-002
+kind: pipeline_node
+status: validated
+edges:
+  - {rel: depends_on, to: NODE-001}
+---
+Second.'
+node "$d" NODE-003.md '---
+id: NODE-003
+kind: pipeline_node
+status: validated
+edges:
+  - {rel: depends_on, to: NODE-002}
+---
+Third.'
+runexplain "$d" NODE-001 NODE-003 NODE-999
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q '^EXPLAIN (2 edges):$' \
+  && echo "$OUT" | grep -qF 'NODE-001 validates EXP-001 "Result line."' \
+  && echo "$OUT" | grep -qF 'NODE-003 depends_on NODE-002 "Second."' \
+  && ! echo "$OUT" | grep -q 'NODE-002 depends_on' \
+  && echo "$OUT" | grep -qF '  (no node NODE-999)'; } \
+  && ok "--explain scope: only the named nodes' edges; unknown ID -> (no node ...) line" \
+  || no "--explain scope" "rc=$RC out=$OUT"
+
+# 54. --explain changes nothing below the block: on a graph with errors the exit code is still 1, on
+#     a clean graph still 0, and the report after the EXPLAIN block (everything past its blank line)
+#     is byte-identical to the run without the flag
+d="$(newfix)"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+---
+No question, no status: two warnings.'
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: depends_on, to: NODE-999}
+  - {rel: validates, to: EXP-001}
+---
+Body.'
+plain="$(bash "$LINT" "$d" 2>&1)"; prc=$?
+expl="$(bash "$LINT" --explain "$d" 2>&1)"; erc=$?
+rest="$(printf '%s\n' "$expl" | sed '1,/^$/d')"
+{ [ "$prc" -eq 1 ] && [ "$erc" -eq 1 ] && [ "$rest" = "$plain" ] && printf '%s\n' "$expl" | head -1 | grep -q '^EXPLAIN (2 edges):$'; } \
+  && ok "--explain on an erroring graph: exit 1, report after the block identical" \
+  || no "--explain erroring graph" "prc=$prc erc=$erc plain=$plain expl=$expl"
+plain="$(bash "$LINT" "$ae4" 2>&1)"; prc=$?
+expl="$(bash "$LINT" --explain "$ae4" 2>&1)"; erc=$?
+rest="$(printf '%s\n' "$expl" | sed '1,/^$/d')"
+{ [ "$prc" -eq 0 ] && [ "$erc" -eq 0 ] && [ "$rest" = "$plain" ] && printf '%s\n' "$expl" | head -1 | grep -q '^EXPLAIN (2 edges):$'; } \
+  && ok "--explain on a clean graph: exit 0, report after the block identical" \
+  || no "--explain clean graph" "prc=$prc erc=$erc plain=$plain expl=$expl"
+
+# 55. legacy invocation, `bash graph-lint.sh <dir>` and `bash graph-lint.sh` from inside the repo,
+#     is byte-identical to the committed script (HEAD) on the case-54 graph and on the example graph:
+#     adding the flag changed nothing for callers that pass zero or one positional
+old="$(mktemp)"
+if git -C "$REPO" show HEAD:plugin/scripts/graph-lint.sh > "$old" 2>/dev/null; then
+  same=1
+  for dir in "$d" "$REPO/examples/doc-search"; do
+    a="$(bash "$old" "$dir" 2>&1)"; arc=$?
+    b="$(bash "$LINT" "$dir" 2>&1)"; brc=$?
+    { [ "$arc" -eq "$brc" ] && [ "$a" = "$b" ]; } || { same=0; diffnote="dir=$dir arc=$arc brc=$brc old=$a new=$b"; }
+  done
+  a="$(cd "$d" && bash "$old" 2>&1)"; arc=$?
+  b="$(cd "$d" && bash "$LINT" 2>&1)"; brc=$?
+  { [ "$arc" -eq "$brc" ] && [ "$a" = "$b" ]; } || { same=0; diffnote="zero-positional arc=$arc brc=$brc old=$a new=$b"; }
+  [ "$same" -eq 1 ] && ok "legacy invocation output byte-identical to HEAD" || no "legacy invocation drift" "$diffnote"
+else
+  ok "legacy invocation pinned against HEAD (skipped: no git history to compare against)"
+fi
+rm -f "$old"
+
+# 56. --explain grammar, both forms: from inside the repo `--explain NODE-008` takes `.` as the root
+#     and the argument as an ID; `--explain <dir> NODE-008` names the root; `--explain <dir>` and a
+#     bare `--explain` from inside the repo render every edge
+a="$(cd "$ae4" && bash "$LINT" --explain NODE-008 2>&1)"; arc=$?
+b="$(bash "$LINT" --explain "$ae4" NODE-008 2>&1)"; brc=$?
+line='NODE-008 validates DEC-002 "Conference proceedings first, behind a pluggable document adapter"'
+{ [ "$arc" -eq 0 ] && [ "$brc" -eq 0 ] && echo "$a" | grep -qF "$line" && echo "$b" | grep -qF "$line" \
+  && echo "$a" | grep -q '^EXPLAIN (1 edges):$' && echo "$b" | grep -q '^EXPLAIN (1 edges):$'; } \
+  && ok "--explain grammar: ID with implicit root and with explicit root both render the AE4 line" \
+  || no "--explain grammar, ID forms" "arc=$arc a=$a brc=$brc b=$b"
+c="$(bash "$LINT" --explain "$ae4" 2>&1)"; crc=$?
+e="$(cd "$ae4" && bash "$LINT" --explain 2>&1)"; erc=$?
+{ [ "$crc" -eq 0 ] && [ "$erc" -eq 0 ] && echo "$c" | grep -q '^EXPLAIN (2 edges):$' && echo "$e" | grep -q '^EXPLAIN (2 edges):$' \
+  && echo "$c" | grep -qF "$line" && echo "$e" | grep -qF "$line" \
+  && echo "$c" | grep -qF 'DEC-002 motivated_by OBS-001 "Reviewers asked for proceedings coverage."' \
+  && echo "$e" | grep -qF 'DEC-002 motivated_by OBS-001 "Reviewers asked for proceedings coverage."'; } \
+  && ok "--explain grammar: no IDs, with and without an explicit root, render every edge" \
+  || no "--explain grammar, no-ID forms" "crc=$crc c=$c erc=$erc e=$e"
 
 echo "---"; echo "graph-lint test: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]
