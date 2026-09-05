@@ -125,8 +125,16 @@ by ID in prose ("blocked on `NODE-003`") so the graph stays legible in conversat
 | `motivated_by` | A motivated_by B | B (observation/result/wiki page) is why A exists. |
 | `spawned` | A spawned B | Working on A produced B. |
 
-An edge `to:` target may be a node ID **or** a `wiki/` path (cross-layer link). The graph
-records the link; the content lives in the wiki file.
+`invalidated_by`, `supersedes`, and `part_of` carry their whole meaning in their direction: the
+lint rejects two nodes that each claim the other with the same relation, and a node that points at
+itself. Put the edge on the node whose reading changes (the undermined experiment carries
+`invalidated_by`), never on both.
+
+An edge `to:` target may be a node ID **or** a repo-relative path (a `wiki/` page, the plan document
+that motivated the node, a results file). The graph records the link; the content lives in the
+file. The lint checks that a node target exists and that a path target resolves the way a
+`provenance:` path does: tracked and present is silent, present but untracked warns, matched by
+the repo `.gitignore` is silent, missing is an error.
 
 ## What logging looks like (best-effort, in-session)
 

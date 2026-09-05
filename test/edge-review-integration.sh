@@ -38,6 +38,8 @@
 # Same headless caveat as the other contract harnesses: `claude -p` does not fire SessionStart
 # hooks, so this measures the skill-activation path only.
 #
+# Measured 2026-09-04, N=5: writes 5/5, TARGET_OK 5/5, NO_MUTUAL 5/5, EXPLAIN_RUN 5/5, 0 errored.
+#
 # COSTS MODEL TOKENS: every iteration is a real `claude -p` run.
 #
 # Usage:   bash test/edge-review-integration.sh [N]     (N = iterations, default 3)

@@ -3,6 +3,49 @@
 All notable changes to tendrel. Versions follow semver. The self-hosted marketplace serves the
 default branch, so the latest tagged version is what installs pull on `/plugin marketplace update`.
 
+## 0.9.0 - 2026-09-04
+
+### Added
+- **Edges mean what they say.** `invalidated_by`, `supersedes`, and `part_of` carry their whole
+  meaning in their direction, so the lint now errors on a pair of nodes that each claim the other
+  with the same relation, and on a node that points at itself. Pairwise and deterministic, with no
+  false-positive surface: two different relations in opposite directions are fine. This is the
+  check that would have caught a reversed `invalidated_by` pair a user shipped under
+  `reconcile = auto` in 0.7.0, and it catches three such pairs on the maintainer's own 111-node
+  graph on the day it lands.
+- **Repo-relative edge targets.** An edge `to:` may name a node or any repo-relative path (a
+  `wiki/` page, the plan document that motivated a node, a results file). Paths are validated the
+  way `provenance:` paths are: tracked and present is silent, present but untracked warns, matched
+  by the repo `.gitignore` is silent whether or not it exists, missing is an error naming both
+  readings (no node with this ID and no such file). The permanent "unrecognized edge target"
+  warning is gone; a link to a private plan document no longer trains readers to skip warnings.
+- **`graph-lint.sh --explain`.** Prints each edge as `SRC rel TARGET "first line of the target"`
+  before the normal report, optionally scoped to node IDs, with the report and exit code unchanged.
+  A wrong target is obvious on sight. `/tendrel:lint` runs it on request ("explain the edges").
+- **Write-moment review in the skill.** Before the first edge to a target in a sweep, the agent
+  reads the target's first body line; after writing edges, it runs `--explain` on the touched nodes
+  and reviews each rendered line before the sweep ends, under `ask` and `auto` alike and never as a
+  prompt. Both sentences are pinned by `test/checks.sh`, and `test/edge-review-integration.sh`
+  measures them headlessly against a fixture whose decoy node shares the prompt's vocabulary while
+  its first line states the opposite claim, so only reading distinguishes the right target.
+  Measured 2026-09-04, N=5: wrote the graph 5/5, linked the intended experiment and not the
+  decoy 5/5, produced no reversed pair 5/5, ran `--explain` before finishing 5/5.
+
+### Fixed
+- The showcase graph (`examples/doc-search`) carried reciprocal `part_of` edges from its theories
+  back to their experiments, the exact shape the new check rejects; the rendered diagram never
+  showed them, and the data now matches it.
+
+### Compatibility
+- Additive in every surface except the lint's verdict on graphs that were already wrong. Newly
+  failing patterns: a reversed same-relation pair or a self-loop on `invalidated_by`,
+  `supersedes`, or `part_of` (3 of 111 nodes on the maintainer's genetics graph carry one); an edge
+  whose target is a path that does not exist and is not ignored (previously a permanent warning);
+  a node ID that strays from `PREFIX-NNN` is still a node target when the node exists, so odd IDs
+  do not start failing. Ignored path targets go silent. Every existing invocation of the lint is
+  byte-identical, pinned by a fixture. The backwards-compat sweep passes on the examples and the
+  compat graphs.
+
 ## 0.8.0 - 2026-09-01
 
 ### Added

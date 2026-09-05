@@ -70,6 +70,15 @@ chance. It writes nothing. Run it if you are wondering whether a stricter number
 would mean anything for your kind of graph; on the graph tendrel was calibrated against, it would
 not (yet).
 
+## See what each edge points at
+
+> "Explain the edges" / "what does each edge on NODE-008 point at?"
+
+`/tendrel:lint` runs the script with `--explain` (optionally followed by node IDs) and relays one
+line per edge: `NODE-008 validates DEC-002 "Conference proceedings first, behind a pluggable
+document adapter"`. A wrong target reads wrong on sight, which is the point; the agent does the
+same review itself after every reconcile that writes edges.
+
 ## Read the status view
 
 `/tendrel:status` regenerates `status.md`: a mermaid diagram of the graph (dependency arrows,
