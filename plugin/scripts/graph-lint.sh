@@ -4,7 +4,8 @@
 # Exits non-zero when any ERROR-severity violation exists. WARNINGS print but do not fail,
 # so this is safe as a CI gate (a broken graph fails; an advisory nudge does not).
 # Checks: dangling edges, unreadable edges, invalid kind/status, duplicate IDs, depends_on cycles,
-# transitive invalidation consistency, and that every `provenance:` path a node declares resolves.
+# mutual or self-referencing invalidated_by/supersedes/part_of edges, transitive invalidation
+# consistency, and that every `provenance:` path a node declares resolves.
 set -uo pipefail
 ROOT="${1:-.}"
 
@@ -208,6 +209,27 @@ for nid, rec in nodes.items():
         elif status == "untracked":
             warnings.append(f"{nid}: provenance path {p} exists but is not tracked by git; "
                             "a clean checkout will report it missing")
+
+# mutual-pair and self-loop checks for the relations where direction carries the meaning.
+# `A invalidated_by B` and `B invalidated_by A` cannot both be true (the same goes for supersedes
+# and part_of), so a reversed pair means at least one edge is wrong: an error, not a nudge. Report
+# it once per relation and unordered pair, with the relation in the dedupe key so two relations
+# reversed between the same nodes are two findings. A self-loop is the same mistake with one node.
+# Pairwise on purpose: a longer ring (A -> B -> C -> A) is not a reversed edge, and depends_on is
+# left out here because its cycles already belong to the cycle detector below.
+DIRECTED = ("invalidated_by", "supersedes", "part_of")
+triples = {(nid, rel, to) for nid, rec in nodes.items() for rel, to in rec["edges"] if rel in DIRECTED}
+seen_pairs = set()
+for src, rel, dst in sorted(triples):
+    if src == dst:
+        errors.append(f"{src}: {rel} edge to itself; remove it.")
+    elif (dst, rel, src) in triples:
+        key = (rel, frozenset((src, dst)))
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        errors.append(f"{src} / {dst}: mutual {rel}, each claims the other. "
+                      "Direction carries the meaning here; remove whichever edge is reversed.")
 
 # depends_on cycle detection (the pipeline is meant to be a DAG)
 adj = {nid: [to for rel, to in rec["edges"] if rel == "depends_on" and to in nodes]

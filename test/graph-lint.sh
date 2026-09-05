@@ -514,5 +514,167 @@ runlint "$d"
 { [ "$RC" -eq 1 ] && [ "$(echo "$OUT" | grep -c "must be repo-relative")" -eq 2 ]; } \
   && ok "absolute and ../ provenance paths -> error" || no "non-relative provenance paths" "rc=$RC out=$OUT"
 
+# 28. reversed invalidated_by pair (AE1): each node claims the other invalidated it. Direction carries
+#     the meaning, so one edge is wrong -> exactly one error naming both nodes and the relation, exit 1
+d="$(newfix)"
+node "$d" DEC-010.md '---
+id: DEC-010
+kind: decision
+status: active
+edges:
+  - {rel: invalidated_by, to: EXP-028}
+---
+Says the experiment invalidated it.'
+node "$d" EXP-028.md '---
+id: EXP-028
+kind: experiment
+status: complete
+question: "q?"
+edges:
+  - {rel: invalidated_by, to: DEC-010}
+---
+Says the decision invalidated it, the other way round.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && [ "$(echo "$OUT" | grep -c "^  E ")" -eq 1 ] \
+  && echo "$OUT" | grep "mutual invalidated_by" | grep -q "DEC-010" \
+  && echo "$OUT" | grep "mutual invalidated_by" | grep -q "EXP-028"; } \
+  && ok "reversed invalidated_by pair -> one error naming both nodes and the relation" \
+  || no "reversed invalidated_by pair" "rc=$RC out=$OUT"
+
+# 29. reversed supersedes AND reversed part_of between the same two nodes -> one error per relation
+#     (the dedupe key includes the relation, so the second finding is not swallowed by the first)
+d="$(newfix)"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+edges:
+  - {rel: supersedes, to: OBS-002}
+  - {rel: part_of, to: OBS-002}
+---
+A.'
+node "$d" OBS-002.md '---
+id: OBS-002
+kind: observation
+edges:
+  - {rel: supersedes, to: OBS-001}
+  - {rel: part_of, to: OBS-001}
+---
+B.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && [ "$(echo "$OUT" | grep -c "^  E ")" -eq 2 ] \
+  && echo "$OUT" | grep -q "mutual supersedes" && echo "$OUT" | grep -q "mutual part_of"; } \
+  && ok "reversed supersedes and part_of on the same pair -> two errors, one per relation" \
+  || no "two relations reversed on one pair" "rc=$RC out=$OUT"
+
+# 30. different relations in opposite directions (AE2): A supersedes B, B part_of A -> no pair error, exit 0
+d="$(newfix)"
+node "$d" OBS-018.md '---
+id: OBS-018
+kind: observation
+edges:
+  - {rel: supersedes, to: EXP-007}
+---
+Supersedes the experiment.'
+node "$d" EXP-007.md '---
+id: EXP-007
+kind: experiment
+status: complete
+question: "q?"
+edges:
+  - {rel: part_of, to: OBS-018}
+---
+Part of the observation.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "mutual"; } \
+  && ok "different relations in opposite directions -> no pair error, exit 0" \
+  || no "different relations opposite directions" "rc=$RC out=$OUT"
+
+# 31. self-loop on part_of -> error naming the node
+d="$(newfix)"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+edges:
+  - {rel: part_of, to: OBS-001}
+---
+Part of itself.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "OBS-001: part_of edge to itself"; } \
+  && ok "self-loop part_of -> error naming the node" || no "self-loop part_of" "rc=$RC out=$OUT"
+
+# 32. reversed pair where one edge carries a trailing field -> still caught (the target capture stops at the comma)
+d="$(newfix)"
+node "$d" DEC-001.md '---
+id: DEC-001
+kind: decision
+status: active
+edges:
+  - {rel: supersedes, to: DEC-002, note: x}
+---
+A.'
+node "$d" DEC-002.md '---
+id: DEC-002
+kind: decision
+status: active
+edges:
+  - {rel: supersedes, to: DEC-001}
+---
+B.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep "mutual supersedes" | grep -q "DEC-001" \
+  && echo "$OUT" | grep "mutual supersedes" | grep -q "DEC-002"; } \
+  && ok "reversed pair with a trailing edge field -> still caught" \
+  || no "reversed pair trailing field" "rc=$RC out=$OUT"
+
+# 33. mutual depends_on belongs to the cycle detector: reported once as a cycle, not again as a pair
+d="$(newfix)"
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: depends_on, to: NODE-002}
+---
+A.'
+node "$d" NODE-002.md '---
+id: NODE-002
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: depends_on, to: NODE-001}
+---
+B.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "depends_on cycle" && ! echo "$OUT" | grep -q "mutual" \
+  && [ "$(echo "$OUT" | grep -c "^  E ")" -eq 1 ]; } \
+  && ok "mutual depends_on -> cycle error only, no pair error" || no "mutual depends_on not duplicated" "rc=$RC out=$OUT"
+
+# 34. three-node part_of ring (A -> B -> C -> A) is not a reversed pair: the check is pairwise by design, exit 0
+d="$(newfix)"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+edges:
+  - {rel: part_of, to: OBS-002}
+---
+A.'
+node "$d" OBS-002.md '---
+id: OBS-002
+kind: observation
+edges:
+  - {rel: part_of, to: OBS-003}
+---
+B.'
+node "$d" OBS-003.md '---
+id: OBS-003
+kind: observation
+edges:
+  - {rel: part_of, to: OBS-001}
+---
+C.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "mutual"; } \
+  && ok "three-node part_of ring -> no pair error (pairwise only)" || no "part_of ring" "rc=$RC out=$OUT"
+
 echo "---"; echo "graph-lint test: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]
