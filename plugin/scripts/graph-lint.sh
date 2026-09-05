@@ -3,9 +3,10 @@
 # Usage: bash graph-lint.sh [repo-dir]   (default: current directory)
 # Exits non-zero when any ERROR-severity violation exists. WARNINGS print but do not fail,
 # so this is safe as a CI gate (a broken graph fails; an advisory nudge does not).
-# Checks: dangling edges, unreadable edges, invalid kind/status, duplicate IDs, depends_on cycles,
-# mutual or self-referencing invalidated_by/supersedes/part_of edges, transitive invalidation
-# consistency, and that every `provenance:` path a node declares resolves.
+# Checks: dangling edges (a target is a node ID or a repo-relative path, and either must resolve),
+# unreadable edges, invalid kind/status, duplicate IDs, depends_on cycles, mutual or
+# self-referencing invalidated_by/supersedes/part_of edges, transitive invalidation consistency,
+# and that every `provenance:` path a node declares resolves.
 set -uo pipefail
 ROOT="${1:-.}"
 
@@ -123,12 +124,16 @@ for path in sorted(glob.glob(os.path.join(graphdir, "*.md"))):
         return mm.group(1).strip().strip('"') if mm else ""
     nid = f("id") or name[:-3]
     # Read each edge from a single line. Tolerant of harmless variation the agent or a human
-    # might introduce: extra spaces around the colons, and extra keys after `to:` (the `[^\s},]+`
+    # might introduce: extra spaces around the colons, extra keys after `to:` (the `[^\s},]+`
     # target capture stops at a comma or brace, so `{rel: depends_on, to: NODE-4, weight: 1}`
-    # still resolves `NODE-4`). What it deliberately does NOT accept is an edge split across
+    # still resolves `NODE-4`), and YAML quotes around the target. The capture keeps the quotes,
+    # so `to: "NODE-004"` is stripped to `NODE-004` here, once, before anything classifies or
+    # compares it; an empty quoted target keeps its quotes so it still reads as a missing path
+    # below and not as the repo root. What it deliberately does NOT accept is an edge split across
     # lines (block-style YAML); those are caught as unreadable below. `.` never crosses a newline
     # here (no DOTALL), so each match stays within one line.
-    edges = re.findall(r"rel\s*:\s*([a-z_]+).*?\bto\s*:\s*([^\s},]+)", fm)
+    edges = [(rel, to.strip('"\'') or to)
+             for rel, to in re.findall(r"rel\s*:\s*([a-z_]+).*?\bto\s*:\s*([^\s},]+)", fm)]
     id_files.setdefault(nid, []).append(name)
     nodes[nid] = {"file": name, "fm": fm, "kind": f("kind"), "status": f("status"),
                   "body": body.strip(), "edges": edges, "provenance": provenance_paths(fm)}
@@ -162,17 +167,34 @@ for nid, rec in nodes.items():
         errors.append(f"{nid}: couldn't read an edge in graph/{rec['file']}. "
                       "Write each edge on one line, e.g.  - {rel: depends_on, to: NODE-004}")
 
-# edge checks: dangling references and invalidation consistency
+# edge checks: dangling references and invalidation consistency. A target has exactly two readings:
+# it matches the node-ID pattern and must name a node in graph/, or it is a repo-relative path
+# (docs/plans/x.md, wiki/page.md, results/a.md) and must resolve the way a provenance path does,
+# through the same git_status() outcomes, with one difference. A path the repo .gitignore matches is
+# silent here, present or absent, where provenance warns: a link to a private plan document is
+# legitimate and permanent, and a warning nobody can act on is the hygiene problem this check
+# exists to remove. There is no third reading. A target that is neither a node nor a file is an
+# error that names both readings, so a lowercase node-ID typo (`node-004`) fails closed instead of
+# drifting past as an advisory. With no git at all, plain existence decides.
 for nid, rec in nodes.items():
     for rel, to in rec["edges"]:
-        if NODE_RE.match(to):
+        # An existing node is a node target even when its ID strays from the PREFIX-NNN pattern;
+        # the lint never validated IDs themselves, so a graph with odd IDs must not start failing
+        # on every edge to them.
+        if NODE_RE.match(to) or to in nodes:
             if to not in nodes:
                 errors.append(f"{nid}: dangling {rel} edge to missing node {to}")
-        elif to.startswith("wiki/"):
-            if not os.path.exists(os.path.join(root, to)):
-                errors.append(f"{nid}: {rel} edge to missing wiki file {to}")
+        elif os.path.isabs(to) or os.path.normpath(to).split(os.sep)[0] == "..":
+            errors.append(f"{nid}: {rel} edge target '{to}' must be repo-relative "
+                          "(no absolute paths, no '..')")
         else:
-            warnings.append(f"{nid}: unrecognized {rel} edge target '{to}'")
+            status = git_status(to)
+            exists = os.path.exists(os.path.join(root, to))
+            if status != "ignored" and not exists:
+                errors.append(f"{nid}: {rel} edge target {to}: no node with this ID and no such file")
+            elif status == "untracked":
+                warnings.append(f"{nid}: {rel} edge target {to} exists but is not tracked by git; "
+                                "a clean checkout will report it missing")
         # Invalidation must propagate transitively. A node that depends_on an invalidated
         # node must be blocked; a node that depends_on an already-blocked node must also be
         # blocked. Because "blocked" itself triggers the rule, a single local pass cascades the
@@ -184,11 +206,12 @@ for nid, rec in nodes.items():
                               f"(status '{rec['status'] or 'none'}')")
 
 # provenance checks: every artifact a node declares must resolve on disk. Deterministic and
-# read-only, the same shape as the wiki/ edge check above. A path git ignores (raw/, work/, data
-# dumps) is a WARNING, not an error: it resolves on the machine that produced it and vanishes from
-# a clean checkout, so an error would turn the lint red in exactly one environment, which is the
-# kind of gate people learn to ignore. Missing and not ignored is an error: the node cites
-# something that is not there.
+# read-only, the same shape as the path-target edge check above. A path git ignores (raw/, work/,
+# data dumps) is a WARNING, not an error: it resolves on the machine that produced it and vanishes
+# from a clean checkout, so an error would turn the lint red in exactly one environment, which is
+# the kind of gate people learn to ignore. (An ignored edge target is silent instead: a cited
+# number should be reproducible from a clean checkout, a link is only a pointer.) Missing and not
+# ignored is an error: the node cites something that is not there.
 for nid, rec in nodes.items():
     for p in rec["provenance"]:
         if p.startswith("?unterminated list:"):

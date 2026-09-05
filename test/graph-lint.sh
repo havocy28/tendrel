@@ -59,7 +59,8 @@ runlint "$d"
 { [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "dangling validates edge to missing node THEORY-999"; } \
   && ok "dangling validates -> error" || no "dangling validates" "rc=$RC out=$OUT"
 
-# 4. dangling wiki edge
+# 4. dangling wiki edge: wiki/ is a repo-relative path like any other, so a missing page is the
+#    generic missing-target error (not a git repo here, so plain existence decides)
 d="$(newfix)"
 node "$d" NODE-001.md '---
 id: NODE-001
@@ -70,7 +71,7 @@ edges:
 ---
 Body.'
 runlint "$d"
-{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "missing wiki file wiki/missing.md"; } \
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "NODE-001: motivated_by edge target wiki/missing.md: no node with this ID and no such file"; } \
   && ok "dangling wiki edge -> error" || no "dangling wiki edge" "rc=$RC out=$OUT"
 
 # 5. invalid kind
@@ -192,40 +193,42 @@ d="$(mktemp -d)"
 runlint "$d"
 [ "$RC" -eq 0 ] && ok "no graph/ dir -> exit 0" || no "no graph dir" "rc=$RC out=$OUT"
 
-# 12. transitive invalidation: C invalidated, B blocked, A depends_on B but NOT blocked -> error
+# 12. transitive invalidation: C invalidated, B blocked, A depends_on B but NOT blocked -> error.
+#     IDs keep the PREFIX-NNN shape (003 = C, 002 = B, 001 = A): a target outside that pattern reads
+#     as a repo-relative path, and a lettered ID like NODE-001 would be a missing-path error (case 40).
 d="$(newfix)"
-node "$d" NODE-C.md '---
-id: NODE-C
+node "$d" NODE-003.md '---
+id: NODE-003
 kind: pipeline_node
 status: invalidated
 ---
 Bad retriever.'
-node "$d" NODE-B.md '---
-id: NODE-B
+node "$d" NODE-002.md '---
+id: NODE-002
 kind: pipeline_node
 status: blocked
 edges:
-  - {rel: depends_on, to: NODE-C}
+  - {rel: depends_on, to: NODE-003}
 ---
 Correctly blocked.'
-node "$d" NODE-A.md '---
-id: NODE-A
+node "$d" NODE-001.md '---
+id: NODE-001
 kind: pipeline_node
 status: assumed_working
 edges:
-  - {rel: depends_on, to: NODE-B}
+  - {rel: depends_on, to: NODE-002}
 ---
 Rests on a blocked node but not blocked itself.'
 runlint "$d"
-{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "NODE-A: depends_on blocked node NODE-B but is not blocked"; } \
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "NODE-001: depends_on blocked node NODE-002 but is not blocked"; } \
   && ok "transitive invalidation (multi-hop) -> error" || no "transitive invalidation" "rc=$RC out=$OUT"
-# positive control: block NODE-A too -> whole chain consistent, exit 0
-node "$d" NODE-A.md '---
-id: NODE-A
+# positive control: block NODE-001 too -> whole chain consistent, exit 0
+node "$d" NODE-001.md '---
+id: NODE-001
 kind: pipeline_node
 status: blocked
 edges:
-  - {rel: depends_on, to: NODE-B}
+  - {rel: depends_on, to: NODE-002}
 ---
 Now blocked, chain consistent.'
 runlint "$d"
@@ -675,6 +678,233 @@ C.'
 runlint "$d"
 { [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "mutual"; } \
   && ok "three-node part_of ring -> no pair error (pairwise only)" || no "part_of ring" "rc=$RC out=$OUT"
+
+# 35. repo-relative edge target (AE3, tracked arm): a committed docs/plans/x.md is silent, exit 0, and
+#     nothing in the output mentions the edge; the retired "unrecognized" warning never appears
+d="$(newfix)"; mkdir -p "$d/docs/plans"; : > "$d/docs/plans/x.md"
+(cd "$d" && git init -q && git add docs/plans/x.md && git -c user.email=t@t -c user.name=t commit -qm init)
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: idea
+edges:
+  - {rel: motivated_by, to: docs/plans/x.md}
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "docs/plans/x.md" && ! echo "$OUT" | grep -q "motivated_by" \
+  && ! echo "$OUT" | grep -q "unrecognized"; } \
+  && ok "tracked repo-relative edge target -> silent, exit 0, no 'unrecognized'" \
+  || no "tracked edge target" "rc=$RC out=$OUT"
+
+# 36. repo-relative edge target (AE3, ignored arm): a path matched by the repo .gitignore is silent
+#     whether or not it exists locally. A link to a private plan document is legitimate and permanent,
+#     so unlike provenance there is no warning here: a nudge nobody can act on is the hygiene problem
+#     this check replaces.
+d="$(newfix)"; (cd "$d" && git init -q && printf 'docs/plans/\n' > .gitignore); mkdir -p "$d/docs/plans"; : > "$d/docs/plans/present.md"
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: idea
+edges:
+  - {rel: motivated_by, to: docs/plans/present.md}
+---
+Body.'
+node "$d" THEORY-002.md '---
+id: THEORY-002
+kind: theory
+status: idea
+edges:
+  - {rel: motivated_by, to: docs/plans/absent.md}
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "docs/plans"; } \
+  && ok "git-ignored edge target -> silent, present and absent alike" || no "git-ignored edge target" "rc=$RC out=$OUT"
+
+# 37. repo-relative edge target (AE3, missing arm): not ignored and not on disk -> error naming the
+#     path and both readings of the target, exit 1
+d="$(newfix)"; (cd "$d" && git init -q)
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: idea
+edges:
+  - {rel: motivated_by, to: docs/plans/missing.md}
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "THEORY-001: motivated_by edge target docs/plans/missing.md: no node with this ID and no such file"; } \
+  && ok "missing repo-relative edge target -> error naming the path and both readings" \
+  || no "missing edge target" "rc=$RC out=$OUT"
+
+# 38. present-but-untracked edge target -> warning (it will be missing in every clone), exit 0
+d="$(newfix)"; mkdir -p "$d/docs/plans"; : > "$d/docs/plans/loose.md"; (cd "$d" && git init -q)
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: idea
+edges:
+  - {rel: motivated_by, to: docs/plans/loose.md}
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "THEORY-001: motivated_by edge target docs/plans/loose.md exists but is not tracked by git" \
+  && ! echo "$OUT" | grep -q "unrecognized"; } \
+  && ok "untracked present edge target -> warning, exit 0" || no "untracked edge target" "rc=$RC out=$OUT"
+
+# 39. wiki/ follows the same rule as any other path: a page matched by the repo .gitignore is silent
+#     whether present or absent (case 4 covers the missing, not-ignored page)
+d="$(newfix)"; (cd "$d" && git init -q && printf 'wiki/\n' > .gitignore); mkdir -p "$d/wiki"; : > "$d/wiki/present.md"
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: validated
+edges:
+  - {rel: motivated_by, to: wiki/present.md}
+  - {rel: motivated_by, to: wiki/absent.md}
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "wiki/"; } \
+  && ok "git-ignored wiki/ page -> silent, present and absent alike" || no "git-ignored wiki page" "rc=$RC out=$OUT"
+
+# 40. lowercase node-ID typo: `node-004` does not match the ID pattern, so it is read as a path; it is
+#     neither, and the error says so in both readings (fail closed, legible). Not a git repo.
+d="$(newfix)"
+node "$d" NODE-004.md '---
+id: NODE-004
+kind: pipeline_node
+status: validated
+---
+The real node.'
+node "$d" NODE-005.md '---
+id: NODE-005
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: depends_on, to: node-004}
+---
+Typo in the target case.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "NODE-005: depends_on edge target node-004: no node with this ID" \
+  && ! echo "$OUT" | grep -q "unrecognized"; } \
+  && ok "lowercase node-ID typo -> error naming both readings" || no "lowercase node-ID typo" "rc=$RC out=$OUT"
+
+# 41. a per-machine core.excludesFile rule matching the missing target does NOT count as ignored (the
+#     same rule as provenance, case 24b): the missing path is an error here exactly as it would be in CI
+d="$(newfix)"; (cd "$d" && git init -q)
+excl="$(mktemp)"; printf 'gone/\n' > "$excl"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+edges:
+  - {rel: motivated_by, to: gone/plan.md}
+---
+Body.'
+OUT="$(cd "$d" && git config core.excludesFile "$excl" && bash "$LINT" "$d" 2>&1)"; RC=$?
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "OBS-001: motivated_by edge target gone/plan.md: no node with this ID and no such file"; } \
+  && ok "per-machine excludesFile rule does not silence a missing edge target" \
+  || no "per-machine excludesFile edge target" "rc=$RC out=$OUT"
+
+# 42. no git at all (plain directory): existence decides. A present file target is silent; a missing
+#     one is an error, and the present sibling stays silent beside it.
+d="$(newfix)"; mkdir -p "$d/docs"; : > "$d/docs/notes.md"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+edges:
+  - {rel: motivated_by, to: docs/notes.md}
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "docs/notes.md" && ! echo "$OUT" | grep -q "unrecognized"; } \
+  && ok "non-git fixture, present edge target -> silent" || no "non-git present edge target" "rc=$RC out=$OUT"
+node "$d" OBS-002.md '---
+id: OBS-002
+kind: observation
+edges:
+  - {rel: motivated_by, to: docs/gone.md}
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "OBS-002: motivated_by edge target docs/gone.md: no node with this ID and no such file" \
+  && ! echo "$OUT" | grep -q "docs/notes.md"; } \
+  && ok "non-git fixture, missing edge target -> error, present sibling silent" \
+  || no "non-git missing edge target" "rc=$RC out=$OUT"
+
+# 43. quoted targets: the edge capture keeps YAML quotes, so they are stripped before classifying.
+#     A quoted tracked path and a quoted (double or single) existing node ID are all silent; a quoted
+#     dangling node ID is still the dangling-node error, and the message names it without its quotes.
+d="$(newfix)"; mkdir -p "$d/docs/plans"; : > "$d/docs/plans/x.md"
+(cd "$d" && git init -q && git add docs/plans/x.md && git -c user.email=t@t -c user.name=t commit -qm init)
+node "$d" NODE-004.md '---
+id: NODE-004
+kind: pipeline_node
+status: validated
+---
+The real node.'
+node "$d" THEORY-001.md "---
+id: THEORY-001
+kind: theory
+status: idea
+edges:
+  - {rel: motivated_by, to: \"docs/plans/x.md\"}
+  - {rel: depends_on, to: \"NODE-004\"}
+  - {rel: validates, to: 'NODE-004'}
+---
+Body."
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "docs/plans/x.md" && ! echo "$OUT" | grep -q "NODE-004" \
+  && ! echo "$OUT" | grep -q "unrecognized"; } \
+  && ok "quoted path and quoted node-ID targets -> silent, exit 0" || no "quoted targets silent" "rc=$RC out=$OUT"
+node "$d" THEORY-002.md '---
+id: THEORY-002
+kind: theory
+status: idea
+edges:
+  - {rel: depends_on, to: "NODE-999"}
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "THEORY-002: dangling depends_on edge to missing node NODE-999"; } \
+  && ok "quoted dangling node ID -> dangling-node error, quotes stripped" || no "quoted dangling node ID" "rc=$RC out=$OUT"
+
+# 44. absolute or parent-escaping edge targets are rejected as not repo-relative (the same rule as
+#     provenance, case 27)
+d="$(newfix)"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+edges:
+  - {rel: motivated_by, to: /etc/hostname}
+  - {rel: motivated_by, to: ../outside.md}
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && [ "$(echo "$OUT" | grep -c "edge target.*must be repo-relative")" -eq 2 ]; } \
+  && ok "absolute and ../ edge targets -> error" || no "non-relative edge targets" "rc=$RC out=$OUT"
+
+# 45. an edge to an EXISTING node whose ID does not match PREFIX-NNN is a node target, not a
+#     missing path: the lint never validated IDs, so odd IDs must not start failing on upgrade.
+d="$(newfix)"
+node "$d" NODE-A.md '---
+id: NODE-A
+kind: pipeline_node
+status: validated
+---
+Body.'
+node "$d" NODE-B.md '---
+id: NODE-B
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: depends_on, to: NODE-A}
+---
+Body.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "NODE-A"; } \
+  && ok "edge to an existing off-pattern node ID is silent" || no "off-pattern existing node target" "rc=$RC out=$OUT"
 
 echo "---"; echo "graph-lint test: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]
