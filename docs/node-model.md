@@ -65,7 +65,8 @@ An edge `to:` target may be a node ID **or** a repo-relative path: a `wiki/` pag
 document that motivated a node, a results file. The graph stores the link; the content stays in
 the file. The lint checks that a node target exists and that a path target resolves the way a
 `provenance:` path does: tracked and present is silent, present but untracked warns (a clean
-checkout will not have it), matched by the repo `.gitignore` is silent, missing is an error.
+checkout will not have it), matched by the repo `.gitignore` is silent, missing is an error. Quote a path that contains spaces; a quoted
+target is read as the node or path it names. Refer to a node by its ID, never by its file path.
 
 ## The pipeline DAG
 

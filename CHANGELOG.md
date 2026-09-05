@@ -42,7 +42,11 @@ default branch, so the latest tagged version is what installs pull on `/plugin m
   `supersedes`, or `part_of` (3 of 111 nodes on the maintainer's genetics graph carry one); an edge
   whose target is a path that does not exist and is not ignored (previously a permanent warning);
   a node ID that strays from `PREFIX-NNN` is still a node target when the node exists, so odd IDs
-  do not start failing. Ignored path targets go silent. Every existing invocation of the lint is
+  do not start failing. A quoted target (`to: "NODE-004"`) is now read as the node or path it
+  names instead of drawing the retired warning, so a quoted edge that hid a dangling node, a
+  `depends_on` on an invalidated node, or a cycle now fails with that check's normal message. An
+  edge whose target is a node file (`graph/NODE-004.md`) is an error naming the ID to use, since a
+  file path would otherwise bypass every node rule. Ignored path targets go silent. Every existing invocation of the lint is
   byte-identical, pinned by a fixture. The backwards-compat sweep passes on the examples and the
   compat graphs.
 

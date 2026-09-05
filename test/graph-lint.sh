@@ -871,6 +871,61 @@ runlint "$d"
 { [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "THEORY-002: dangling depends_on edge to missing node NODE-999"; } \
   && ok "quoted dangling node ID -> dangling-node error, quotes stripped" || no "quoted dangling node ID" "rc=$RC out=$OUT"
 
+# 43b. quote-stripping changes verdicts, not only silence: a quoted depends_on target `"NODE-003"`
+#      reaches the invalidation rule as NODE-003, so an invalidated target with an unblocked source is
+#      the normal propagation error, exit 1 (the quotes never make the edge invisible to that rule)
+d="$(newfix)"
+node "$d" NODE-003.md '---
+id: NODE-003
+kind: pipeline_node
+status: invalidated
+---
+Bad retriever.'
+node "$d" NODE-004.md '---
+id: NODE-004
+kind: pipeline_node
+status: assumed_working
+edges:
+  - {rel: depends_on, to: "NODE-003"}
+---
+Quoted target, not blocked.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "NODE-004: depends_on invalidated node NODE-003 but is not blocked"; } \
+  && ok "quoted depends_on target to an invalidated node -> propagation error, exit 1" \
+  || no "quoted depends_on invalidated" "rc=$RC out=$OUT"
+
+# 43c. a quoted path target is captured whole, so a tracked file whose name holds a space or a comma
+#      resolves: `to: "docs/my plan.md"` and `to: 'docs/a,b.md'` are silent, exit 0. Unquoted, the
+#      capture still ends at the first space (the known limit): `to: docs/my plan.md` reads as
+#      `docs/my`, and the missing-target error names that truncated path so the cause is visible.
+d="$(newfix)"; mkdir -p "$d/docs"; : > "$d/docs/my plan.md"; : > "$d/docs/a,b.md"
+(cd "$d" && git init -q && git add docs && git -c user.email=t@t -c user.name=t commit -qm init)
+node "$d" THEORY-001.md "---
+id: THEORY-001
+kind: theory
+status: idea
+edges:
+  - {rel: motivated_by, to: \"docs/my plan.md\"}
+  - {rel: motivated_by, to: 'docs/a,b.md'}
+---
+Body."
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "docs/"; } \
+  && ok "quoted targets holding a space and a comma -> captured whole, tracked, silent" \
+  || no "quoted target with space or comma" "rc=$RC out=$OUT"
+node "$d" THEORY-002.md '---
+id: THEORY-002
+kind: theory
+status: idea
+edges:
+  - {rel: motivated_by, to: docs/my plan.md}
+---
+Unquoted, the space ends the target.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "THEORY-002: motivated_by edge target docs/my: no node with this ID and no such file"; } \
+  && ok "unquoted target with a space -> cut at the space (known limit), error names docs/my" \
+  || no "unquoted target with space" "rc=$RC out=$OUT"
+
 # 44. absolute or parent-escaping edge targets are rejected as not repo-relative (the same rule as
 #     provenance, case 27)
 d="$(newfix)"
@@ -906,6 +961,41 @@ Body.'
 runlint "$d"
 { [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "NODE-A"; } \
   && ok "edge to an existing off-pattern node ID is silent" || no "off-pattern existing node target" "rc=$RC out=$OUT"
+
+# 45b. an edge target that names a node FILE (`graph/NODE-003.md`) is not a path. Read as one it
+#      resolves as a present or tracked file and slips past the dangling, invalidation-propagation,
+#      mutual-pair and self-loop rules. Fail closed: an error naming the ID to use instead, exit 1,
+#      for a depends_on to an invalidated node's file and for a part_of to the node's own file.
+d="$(newfix)"
+node "$d" NODE-003.md '---
+id: NODE-003
+kind: pipeline_node
+status: invalidated
+---
+Bad retriever.'
+node "$d" NODE-004.md '---
+id: NODE-004
+kind: pipeline_node
+status: assumed_working
+edges:
+  - {rel: depends_on, to: graph/NODE-003.md}
+---
+Points at the file, not the node, and is not blocked.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "NODE-004: depends_on edge target graph/NODE-003.md names a node file; use its ID NODE-003"; } \
+  && ok "edge target naming a node file -> error naming the ID, exit 1 (not read as a path)" \
+  || no "node-file edge target" "rc=$RC out=$OUT"
+node "$d" OBS-001.md '---
+id: OBS-001
+kind: observation
+edges:
+  - {rel: part_of, to: graph/OBS-001.md}
+---
+Part of its own file.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "OBS-001: part_of edge target graph/OBS-001.md names a node file; use its ID OBS-001"; } \
+  && ok "part_of to the node's own file -> same error (the self-loop rule is bypassed otherwise)" \
+  || no "node-file self target" "rc=$RC out=$OUT"
 
 # 46. --explain: NODE-008 validates DEC-002, whose first body line is a plain sentence -> one
 #     line per edge of the named node in the form SRC rel TARGET "summary", then the normal report,
@@ -1141,25 +1231,75 @@ rest="$(printf '%s\n' "$expl" | sed '1,/^$/d')"
   && ok "--explain on a clean graph: exit 0, report after the block identical" \
   || no "--explain clean graph" "prc=$prc erc=$erc plain=$plain expl=$expl"
 
-# 55. legacy invocation, `bash graph-lint.sh <dir>` and `bash graph-lint.sh` from inside the repo,
-#     is byte-identical to the committed script (HEAD) on the case-54 graph and on the example graph:
-#     adding the flag changed nothing for callers that pass zero or one positional
-old="$(mktemp)"
-if git -C "$REPO" show HEAD:plugin/scripts/graph-lint.sh > "$old" 2>/dev/null; then
-  same=1
-  for dir in "$d" "$REPO/examples/doc-search"; do
-    a="$(bash "$old" "$dir" 2>&1)"; arc=$?
-    b="$(bash "$LINT" "$dir" 2>&1)"; brc=$?
-    { [ "$arc" -eq "$brc" ] && [ "$a" = "$b" ]; } || { same=0; diffnote="dir=$dir arc=$arc brc=$brc old=$a new=$b"; }
+# 55. legacy invocation, `bash graph-lint.sh` from inside the repo and `bash graph-lint.sh <dir>`, is
+#     pinned to a golden output written here as a literal: the exact report, byte for byte, and the
+#     exit code, for a case-54 style graph and for the example graph. Both forms run from inside the
+#     graph's directory (the positional is `.`) so the report names `./graph` and the literal is
+#     stable. A negative control perturbs one printed string in a copy of the script and runs the
+#     same comparison, which must FAIL: a pin that cannot fail pins nothing (the earlier form compared
+#     the working tree to HEAD, the same file once committed).
+golden(){   # golden SCRIPT DIR EXPECTED_FILE EXPECTED_RC: 0 when both legacy forms match byte for byte
+  local script="$1" dir="$2" want="$3" wrc="$4" got rc form
+  got="$(mktemp)"; GOLD_NOTE=""
+  for form in zero-positional one-positional; do
+    if [ "$form" = zero-positional ]; then (cd "$dir" && bash "$script" > "$got" 2>&1); rc=$?
+    else (cd "$dir" && bash "$script" . > "$got" 2>&1); rc=$?; fi
+    if [ "$rc" -ne "$wrc" ] || ! cmp -s "$got" "$want"; then
+      GOLD_NOTE="$form: rc=$rc want=$wrc; diff (want vs got): $(diff "$want" "$got" | head -4 | tr '\n' ' ')"
+      rm -f "$got"; return 1
+    fi
   done
-  a="$(cd "$d" && bash "$old" 2>&1)"; arc=$?
-  b="$(cd "$d" && bash "$LINT" 2>&1)"; brc=$?
-  { [ "$arc" -eq "$brc" ] && [ "$a" = "$b" ]; } || { same=0; diffnote="zero-positional arc=$arc brc=$brc old=$a new=$b"; }
-  [ "$same" -eq 1 ] && ok "legacy invocation output byte-identical to HEAD" || no "legacy invocation drift" "$diffnote"
+  rm -f "$got"; return 0
+}
+base="$(mktemp -d)"; d="$base/repo"; mkdir -p "$d/graph"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+---
+No question, no status: two warnings.'
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: depends_on, to: NODE-999}
+  - {rel: validates, to: EXP-001}
+---
+Body.'
+want="$(mktemp)"
+cat > "$want" <<'EOF'
+graph-lint: 2 node(s) in ./graph
+
+ERRORS (1):
+  E NODE-001: dangling depends_on edge to missing node NODE-999
+
+WARNINGS (2):
+  W EXP-001: missing status
+  W EXP-001: experiment missing 'question'
+
+1 error(s), 2 warning(s).
+EOF
+golden "$LINT" "$d" "$want" 1 \
+  && ok "legacy invocation (zero and one positional) matches the golden report and exit code" \
+  || no "legacy invocation golden" "$GOLD_NOTE"
+want2="$(mktemp)"
+cat > "$want2" <<'EOF'
+graph-lint: 12 node(s) in ./graph
+clean: no integrity problems found.
+
+0 error(s), 0 warning(s).
+EOF
+golden "$LINT" "$REPO/examples/doc-search" "$want2" 0 \
+  && ok "legacy invocation on examples/doc-search matches the golden report and exit code" \
+  || no "legacy invocation golden, doc-search" "$GOLD_NOTE"
+bad="$(mktemp)"; sed 's/error(s), /errors, /' "$LINT" > "$bad"
+if golden "$bad" "$d" "$want" 1; then
+  no "negative control: a script with one perturbed string must NOT match the golden (pin is dead)"
 else
-  ok "legacy invocation pinned against HEAD (skipped: no git history to compare against)"
+  ok "negative control: a script with one perturbed string fails the golden comparison (pin is live)"
+  echo "  $GOLD_NOTE"
 fi
-rm -f "$old"
+rm -f "$bad" "$want" "$want2"
 
 # 56. --explain grammar, both forms: from inside the repo `--explain NODE-008` takes `.` as the root
 #     and the argument as an ID; `--explain <dir> NODE-008` names the root; `--explain <dir>` and a
@@ -1179,6 +1319,83 @@ e="$(cd "$ae4" && bash "$LINT" --explain 2>&1)"; erc=$?
   && echo "$e" | grep -qF 'DEC-002 motivated_by OBS-001 "Reviewers asked for proceedings coverage."'; } \
   && ok "--explain grammar: no IDs, with and without an explicit root, render every edge" \
   || no "--explain grammar, no-ID forms" "crc=$crc c=$c erc=$erc e=$e"
+
+# 57. --explain summaries for the shapes a path target can take: a directory renders (directory); a
+#     file holding a NUL byte renders (binary file); a file that opens a frontmatter fence and never
+#     closes it renders the first non-blank line after the opening `---` (a bare `---` is not a
+#     summary); an absolute or parent-escaping target renders (missing) and is never opened, so the
+#     sentinel line inside those files appears nowhere in the output. Non-git, so the present targets
+#     are silent in the report; the two escaping targets keep their repo-relative errors, exit 1.
+base="$(mktemp -d)"; d="$base/repo"; mkdir -p "$d/graph" "$d/docs/sub"
+printf 'abc\0def\n' > "$d/docs/bin.dat"
+printf -- '---\ntitle: Open fence\nnever: closed\n' > "$d/docs/open.md"
+printf 'OUTSIDE-SENTINEL-LINE\n' > "$base/outside.md"
+node "$d" NODE-001.md "---
+id: NODE-001
+kind: pipeline_node
+status: validated
+edges:
+  - {rel: motivated_by, to: docs/sub}
+  - {rel: motivated_by, to: docs/bin.dat}
+  - {rel: motivated_by, to: docs/open.md}
+  - {rel: motivated_by, to: $base/outside.md}
+  - {rel: motivated_by, to: ../outside.md}
+---
+Body."
+runexplain "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -qF 'NODE-001 motivated_by docs/sub "(directory)"' \
+  && [ "$(echo "$OUT" | grep -c 'docs/sub')" -eq 1 ]; } \
+  && ok "--explain: directory target -> (directory), silent in the report" || no "--explain directory target" "rc=$RC out=$OUT"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -qF 'NODE-001 motivated_by docs/bin.dat "(binary file)"' \
+  && [ "$(echo "$OUT" | grep -c 'docs/bin.dat')" -eq 1 ]; } \
+  && ok "--explain: file with a NUL byte -> (binary file)" || no "--explain binary target" "rc=$RC out=$OUT"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -qF 'NODE-001 motivated_by docs/open.md "title: Open fence"' \
+  && ! echo "$OUT" | grep -qF 'docs/open.md "---"'; } \
+  && ok "--explain: unclosed frontmatter fence -> first line after the opening ---, not the bare fence" \
+  || no "--explain unclosed fence" "rc=$RC out=$OUT"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -qF "NODE-001 motivated_by $base/outside.md \"(missing)\"" \
+  && echo "$OUT" | grep -qF 'NODE-001 motivated_by ../outside.md "(missing)"' \
+  && ! echo "$OUT" | grep -q 'OUTSIDE-SENTINEL-LINE' \
+  && [ "$(echo "$OUT" | grep -c "edge target.*must be repo-relative")" -eq 2 ]; } \
+  && ok "--explain: absolute and ../ targets -> (missing), never opened, errors still reported" \
+  || no "--explain escaping target" "rc=$RC out=$OUT"
+
+# 58. --explain root detection: a directory literally named NODE-008 beside graph/ must not be taken
+#     as the root. From inside the repo `--explain NODE-008` is the node ID (a bare name with no
+#     slash and no graph/ inside it is never a root); from the parent, the bare directory name IS the
+#     root because it has a graph/ inside. The explicit-root forms in case 56 keep working.
+d="$(newfix)"; mkdir -p "$d/NODE-008"
+node "$d" DEC-002.md '---
+id: DEC-002
+kind: decision
+status: active
+---
+Conference proceedings first.'
+node "$d" NODE-008.md '---
+id: NODE-008
+kind: pipeline_node
+status: validated
+edges:
+  - {rel: validates, to: DEC-002}
+---
+Proceedings adapter.'
+line='NODE-008 validates DEC-002 "Conference proceedings first."'
+a="$(cd "$d" && bash "$LINT" --explain NODE-008 2>&1)"; arc=$?
+{ [ "$arc" -eq 0 ] && echo "$a" | grep -q '^EXPLAIN (1 edges):$' && echo "$a" | grep -qF "$line" \
+  && ! echo "$a" | grep -q 'no graph/ directory'; } \
+  && ok "--explain NODE-008 beside a directory named NODE-008 -> the ID, not the root" \
+  || no "--explain ID shadowed by a directory" "arc=$arc a=$a"
+b="$(cd "$(dirname "$d")" && bash "$LINT" --explain "$(basename "$d")" NODE-008 2>&1)"; brc=$?
+{ [ "$brc" -eq 0 ] && echo "$b" | grep -q '^EXPLAIN (1 edges):$' && echo "$b" | grep -qF "$line"; } \
+  && ok "--explain <bare dir name with graph/ inside> NODE-008 -> the root, then the ID" \
+  || no "--explain bare root name" "brc=$brc b=$b"
+
+# 59. `--explain` is accepted only as the first argument: anywhere else it is a usage error, exit 2,
+#     with no report (legacy callers never pass the flag, so nothing that worked before changes)
+OUT="$(bash "$LINT" "$d" --explain 2>&1)"; RC=$?
+{ [ "$RC" -eq 2 ] && echo "$OUT" | grep -qi "usage" && ! echo "$OUT" | grep -q "node(s) in" \
+  && ! echo "$OUT" | grep -q "error(s)"; } \
+  && ok "--explain after the root -> usage error, exit 2, no report" || no "--explain not first" "rc=$RC out=$OUT"
 
 echo "---"; echo "graph-lint test: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

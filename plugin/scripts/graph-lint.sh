@@ -11,17 +11,32 @@
 # self-referencing invalidated_by/supersedes/part_of edges, transitive invalidation consistency,
 # and that every `provenance:` path a node declares resolves.
 set -uo pipefail
-# `--explain` is the only flag and is consumed first. After it, the first argument is the repo dir
-# only when it names an existing directory; otherwise every argument is a node ID and the repo dir
-# stays `.`, so `cd repo && graph-lint.sh --explain NODE-008` works without naming the root. Without
-# the flag the one optional positional is the repo dir, exactly as before.
+# `--explain` is the only flag and must come first; anywhere else it is a usage error (exit 2), so
+# a misplaced flag never lints silently as if it were a node ID or a root. After it, the first
+# argument is the repo dir only when it is an existing directory that also looks like a root: `.`,
+# `..`, anything with a slash in it, or a bare name with a graph/ inside. A bare name with neither is
+# a node ID even when a directory of that name exists, so `cd repo && graph-lint.sh --explain
+# NODE-008` renders NODE-008 whether or not a stray NODE-008/ sits beside graph/. The remaining
+# arguments are node IDs and the repo dir stays `.`. Without the flag the one optional positional is
+# the repo dir, exactly as before.
 EXPLAIN=0; EXPLAIN_IDS=""
 if [ "${1:-}" = "--explain" ]; then
   EXPLAIN=1; shift
   ROOT="."
-  if [ $# -gt 0 ] && [ -d "$1" ]; then ROOT="$1"; shift; fi
+  if [ $# -gt 0 ] && [ -d "$1" ]; then
+    case "$1" in
+      .|..|*/*) ROOT="$1"; shift ;;
+      *) if [ -d "$1/graph" ]; then ROOT="$1"; shift; fi ;;
+    esac
+  fi
   EXPLAIN_IDS="$*"
 else
+  for arg in "$@"; do
+    if [ "$arg" = "--explain" ]; then
+      echo "usage: graph-lint.sh [--explain] [repo-dir] [NODE-ID ...]   (--explain must be the first argument)" >&2
+      exit 2
+    fi
+  done
   ROOT="${1:-.}"
 fi
 
@@ -154,16 +169,20 @@ for path in sorted(glob.glob(os.path.join(graphdir, "*.md"))):
         return mm.group(1).strip().strip('"') if mm else ""
     nid = f("id") or name[:-3]
     # Read each edge from a single line. Tolerant of harmless variation the agent or a human
-    # might introduce: extra spaces around the colons, extra keys after `to:` (the `[^\s},]+`
-    # target capture stops at a comma or brace, so `{rel: depends_on, to: NODE-4, weight: 1}`
-    # still resolves `NODE-4`), and YAML quotes around the target. The capture keeps the quotes,
-    # so `to: "NODE-004"` is stripped to `NODE-004` here, once, before anything classifies or
-    # compares it; an empty quoted target keeps its quotes so it still reads as a missing path
-    # below and not as the repo root. What it deliberately does NOT accept is an edge split across
-    # lines (block-style YAML); those are caught as unreadable below. `.` never crosses a newline
-    # here (no DOTALL), so each match stays within one line.
+    # might introduce: extra spaces around the colons, extra keys after `to:` (a bare target ends
+    # at the first space, comma or brace, so `{rel: depends_on, to: NODE-4, weight: 1}` still
+    # resolves `NODE-4`), and YAML quotes around the target. A quoted target is captured whole, so
+    # `to: "docs/my plan.md"` keeps its space and `to: 'docs/a,b.md'` its comma; unquoted, the
+    # same names end at the space or comma (the known limit, so quote such paths). The capture
+    # keeps the quotes, and `to: "NODE-004"` is stripped to `NODE-004` here, once, before anything
+    # classifies or compares it; an empty quoted target keeps its quotes so it still reads as a
+    # missing path below and not as the repo root. What it deliberately does NOT accept is an edge
+    # split across lines (block-style YAML); those are caught as unreadable below. Neither `.` nor
+    # the quoted classes cross a newline here (no DOTALL, `\n` excluded), so each match stays
+    # within one line and an unclosed quote falls back to the bare-token reading.
     edges = [(rel, to.strip('"\'') or to)
-             for rel, to in re.findall(r"rel\s*:\s*([a-z_]+).*?\bto\s*:\s*([^\s},]+)", fm)]
+             for rel, to in re.findall(
+                 r"""rel\s*:\s*([a-z_]+).*?\bto\s*:\s*("[^"\n]*"|'[^'\n]*'|[^\s},]+)""", fm)]
     id_files.setdefault(nid, []).append(name)
     nodes[nid] = {"file": name, "fm": fm, "kind": f("kind"), "status": f("status"),
                   "body": body.strip(), "edges": edges, "provenance": provenance_paths(fm)}
@@ -176,7 +195,9 @@ def edge_summary(to):
     points at, so a wrong target reads wrong at a glance. A node target (the quote-stripped `to`
     the loop above resolved) gives its first body line; a repo-relative file gives its first
     non-blank line after any leading frontmatter block, read with the same fence rule as a node.
-    `(empty body)` when there is no such line, `(missing)` when the target is neither a node nor a
+    A file that opens a fence and never closes it gives the first non-blank line after the opening
+    `---` instead, since a bare `---` is not a summary of anything. `(empty body)` when there is no
+    such line, `(missing)` when the target is neither a node nor a
     file the lint would accept (absolute and `..` paths included, so this never reads outside the
     repo). Cut at SUMMARY_WIDTH characters with a trailing `...` so a long first paragraph stays one
     line. Deterministic and read-only: the same graph always renders the same lines."""
@@ -197,6 +218,8 @@ def edge_summary(to):
         m = FM_RE.match(text)
         if m:
             text = m.group(2)
+        elif re.match(r"^---(\n|$)", text):
+            text = text[4:]     # unclosed fence: skip the opening `---` line only
     line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
     if not line:
         return "(empty body)"
@@ -239,18 +262,27 @@ for nid, rec in nodes.items():
 # legitimate and permanent, and a warning nobody can act on is the hygiene problem this check
 # exists to remove. There is no third reading. A target that is neither a node nor a file is an
 # error that names both readings, so a lowercase node-ID typo (`node-004`) fails closed instead of
-# drifting past as an advisory. With no git at all, plain existence decides.
+# drifting past as an advisory. With no git at all, plain existence decides. A target that names a
+# node FILE (`graph/NODE-003.md`) is neither reading: as a path it would resolve as a present or
+# tracked file and slip past the dangling, invalidation, mutual-pair and self-loop rules, so it is
+# an error that names the ID to use instead. Fail closed, never reclassify.
+file_ids = {f: i for i, fs in id_files.items() for f in fs}
 for nid, rec in nodes.items():
     for rel, to in rec["edges"]:
         # An existing node is a node target even when its ID strays from the PREFIX-NNN pattern;
         # the lint never validated IDs themselves, so a graph with odd IDs must not start failing
         # on every edge to them.
+        norm = os.path.normpath(to)
         if NODE_RE.match(to) or to in nodes:
             if to not in nodes:
                 errors.append(f"{nid}: dangling {rel} edge to missing node {to}")
         elif escapes_repo(to):
             errors.append(f"{nid}: {rel} edge target '{to}' must be repo-relative "
                           "(no absolute paths, no '..')")
+        elif norm.split(os.sep)[0] == "graph" and norm.endswith(".md"):
+            base = os.path.basename(norm)
+            errors.append(f"{nid}: {rel} edge target {to} names a node file; "
+                          f"use its ID {file_ids.get(base, base[:-3])}")
         else:
             status, exists = target_state(to)
             if status != "ignored" and not exists:

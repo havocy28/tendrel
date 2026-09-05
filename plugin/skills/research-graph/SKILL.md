@@ -134,7 +134,8 @@ An edge `to:` target may be a node ID **or** a repo-relative path (a `wiki/` pag
 that motivated the node, a results file). The graph records the link; the content lives in the
 file. The lint checks that a node target exists and that a path target resolves the way a
 `provenance:` path does: tracked and present is silent, present but untracked warns, matched by
-the repo `.gitignore` is silent, missing is an error.
+the repo `.gitignore` is silent, missing is an error. Quote a path that contains spaces. Refer to
+a node by its ID, never by its file path; a `graph/<ID>.md` target is an error naming the ID.
 
 ## What logging looks like (best-effort, in-session)
 
