@@ -58,8 +58,11 @@ behind at session open, that's your cue to reconcile.
 `/tendrel:lint` runs a deterministic, read-only script (`plugin/scripts/graph-lint.sh`) over
 `graph/`. This is a deliberate split: **detection is a script, repair is the model.** Integrity is
 load-bearing, so detection is deterministic and never subject to a reasoning lapse; the script
-flags dangling edges, invalid kinds or statuses, duplicate IDs, `depends_on` cycles, `provenance:`
-paths that do not resolve, and the invalidation-consistency rule. That rule is transitive: a node that `depends_on` an `invalidated`
+flags dangling edges (a node ID that does not exist, or a repo-relative path that does not
+resolve), mutual or self-referencing `invalidated_by`, `supersedes`, and `part_of` edges (direction
+carries their meaning, so two nodes each claiming the other is always wrong), invalid kinds or
+statuses, duplicate IDs, `depends_on` cycles, `provenance:` paths that do not resolve, and the
+invalidation-consistency rule. That rule is transitive: a node that `depends_on` an `invalidated`
 (or already-`blocked`) node must itself be `blocked`, so an invalidation that only propagated one
 level down a chain still fails the check. It exits non-zero on errors and never writes to `graph/`.
 
@@ -68,6 +71,13 @@ violations, Claude summarizes them and offers to fix them through the same recon
 uses everywhere else; it writes only after you approve, and then re-runs the lint so the
 deterministic check confirms the fix held. The script is safe to wire into CI as a
 gate, since a broken graph fails the run while advisory warnings do not.
+
+The lint cannot tell whether an edge means what it says: a `validates` edge written from memory to
+the wrong decision has a real target and passes. So the skill asks the agent to read a target's
+first body line before linking it for the first time, and after writing edges to run
+`graph-lint.sh --explain`, which prints each edge with its target's first line, and review the
+rendered lines before the sweep ends. A wrong target is obvious on sight. Both habits are pinned
+sentences in the skill, and their compliance is measured, not assumed.
 
 ## Provenance and calibration
 

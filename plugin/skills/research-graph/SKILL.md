@@ -125,8 +125,17 @@ by ID in prose ("blocked on `NODE-003`") so the graph stays legible in conversat
 | `motivated_by` | A motivated_by B | B (observation/result/wiki page) is why A exists. |
 | `spawned` | A spawned B | Working on A produced B. |
 
-An edge `to:` target may be a node ID **or** a `wiki/` path (cross-layer link). The graph
-records the link; the content lives in the wiki file.
+`invalidated_by`, `supersedes`, and `part_of` carry their whole meaning in their direction: the
+lint rejects two nodes that each claim the other with the same relation, and a node that points at
+itself. Put the edge on the node whose reading changes (the undermined experiment carries
+`invalidated_by`), never on both.
+
+An edge `to:` target may be a node ID **or** a repo-relative path (a `wiki/` page, the plan document
+that motivated the node, a results file). The graph records the link; the content lives in the
+file. The lint checks that a node target exists and that a path target resolves the way a
+`provenance:` path does: tracked and present is silent, present but untracked warns, matched by
+the repo `.gitignore` is silent, missing is an error. Quote a path that contains spaces. Refer to
+a node by its ID, never by its file path; a `graph/<ID>.md` target is an error naming the ID.
 
 ## What logging looks like (best-effort, in-session)
 
@@ -140,6 +149,10 @@ records the link; the content lives in the wiki file.
   this prevents. If no artifact holds the number, say so in the body ("hand-computed", "reported
   verbally") rather than lending it false precision. This is a write-time habit, never a prompt;
   nothing here interrupts the user.
+- **Linking to another node** → before writing the first edge to a target in a sweep or turn,
+  read the target's first body line; a node you read or wrote earlier in the same sweep counts as
+  read. An ID guessed from memory is how a `validates` edge once landed on an unrelated decision.
+  This is a write-time habit, never a prompt.
 - **A methodological choice** → a `decision` node with edges to the experiments that
   justify it. Reversing it → set the old one `reversed`, create the new one, add
   `supersedes` with a one-line reason.
@@ -196,6 +209,12 @@ When reconciling:
    precise figure in its body, copy it from the cited artifact and declare that artifact in
    `provenance:` (see the logging section); never restate a number from conversation when the
    file that produced it is on disk.
+   After writing or changing edges, and before ending the sweep, run
+   `bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh" --explain . <touched node IDs>` (if the
+   variable is unset, locate the plugin's `scripts/graph-lint.sh`) and review each rendered line:
+   an edge whose target summary does not match the claim you meant to make is corrected before
+   the sweep ends. This applies under `reconcile = ask` and `reconcile = auto` alike and never
+   prompts the user.
 2. **Friction:** if anything about the system was annoying — something you wanted to ask and
    couldn't, something hard to log, ceremony, strained traversal — append it to the tool-global
    friction log at `${CLAUDE_PLUGIN_DATA}/FRICTION.md` (resolves to
@@ -237,11 +256,17 @@ Two honesty rules for background mode:
 authoritative for *detection*: it checks for dangling edges (a `to:` node ID or `wiki/` path that
 does not exist), an edge it cannot read (one not written in the flat one-line form), invalid
 `kind`/`status` values, duplicate IDs, `depends_on` cycles, the key consistency rule, that a
-node which `depends_on` an `invalidated` (or already-`blocked`) node must itself be `blocked`, and
-that every `provenance:` path resolves (a git-ignored path is a warning, not an error). The
-consistency rule cascades: because a blocked dependency also triggers it, invalidation must
-propagate all the way down a chain, not just one hop. It exits non-zero on errors; warnings (like
-an empty body) do not fail.
+node which `depends_on` an `invalidated` (or already-`blocked`) node must itself be `blocked`,
+that every `provenance:` path resolves (a git-ignored path is a warning, not an error), mutual or
+self-referencing `invalidated_by`, `supersedes`, and `part_of` edges (direction carries their
+meaning, so two nodes each claiming the other is always wrong), and edge targets that are
+repo-relative paths (a tracked path resolves silently, an untracked present path warns, a path
+matched by the repo `.gitignore` is silent, a missing path errors). The consistency rule cascades:
+because a blocked dependency also triggers it, invalidation must propagate all the way down a
+chain, not just one hop. It exits non-zero on errors; warnings (like an empty body) do not fail.
+`--explain` is available on demand ("explain the edges", "what does each edge point at?") and
+renders every edge, or only those of the node IDs you name, with its target's first line, so an
+edge that resolves cleanly but says the wrong thing is visible to a reader.
 
 When the lint reports **error**-severity violations, summarize them and **offer** to fix them; do
 not auto-fix. On the user's approval, repair through the normal reconcile behavior:
@@ -256,6 +281,12 @@ not auto-fix. On the user's approval, repair through the normal reconcile behavi
 - missing provenance path: ask the user which artifact was meant and re-point it, or remove the
   entry if they confirm it; do not guess a path. A git-ignored path is only a warning; leave it
   unless the user would rather cite a tracked artifact.
+- mutual pair (`invalidated_by`, `supersedes`, or `part_of` running both ways between two nodes):
+  ask the user which direction is true and remove the reversed edge, never both; direction is the
+  claim, and the graph alone cannot tell you which way it goes.
+- self-loop: remove the edge; a node cannot invalidate, supersede, or belong to itself.
+- missing path target (an edge `to:` a repo-relative path that is not on disk): ask the user which
+  artifact was meant and re-point it, or remove it if they confirm; do not guess a path.
 
 After you apply an approved repair, **re-run `graph-lint.sh`** and report the result. Repair is
 model-driven and its quality is not deterministic, so the deterministic check is what confirms the

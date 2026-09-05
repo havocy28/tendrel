@@ -71,6 +71,19 @@ grep -q 'provenance' plugin/skills/research-graph/SKILL.md && grep -q 'provenanc
 grep -q '^## Calibrate' plugin/skills/research-graph/SKILL.md && grep -q 'tendrel:calibrate' README.md \
   && ok "Calibrate section in SKILL.md and README row" || no "Calibrate section in SKILL.md and README row"
 
+# 3e. edge-semantics write-side contracts survive edits. The two sentences are the only mitigation
+#     for an edge that resolves cleanly but points at the wrong node (a guessed ID, a reversed pair
+#     with no mirror), which no deterministic check can see; lint.md must name --explain or the
+#     review step points at nothing.
+grep -qF "read the target's first body line" plugin/skills/research-graph/SKILL.md \
+  && ok "read-before-linking contract present in SKILL.md" \
+  || no "read-before-linking contract present in SKILL.md" "the read-before-linking sentence is load-bearing"
+grep -qF 'review each rendered line' plugin/skills/research-graph/SKILL.md \
+  && ok "explain-review contract present in SKILL.md" \
+  || no "explain-review contract present in SKILL.md" "the explain-review sentence is load-bearing"
+grep -qF -- '--explain' plugin/commands/lint.md \
+  && ok "--explain named in lint.md" || no "--explain named in lint.md"
+
 # 4. no em dashes in user-facing docs and commands (SKILL.md and spike fixtures excluded:
 #    SKILL.md carries known pre-existing em dashes).
 #    Only TRACKED docs are scanned. docs/plans/ is gitignored working material, and walking the

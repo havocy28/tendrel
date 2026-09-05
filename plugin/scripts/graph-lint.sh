@@ -1,18 +1,52 @@
 #!/usr/bin/env bash
 # Deterministic graph-integrity lint for tendrel. Read-only: it never writes to graph/.
-# Usage: bash graph-lint.sh [repo-dir]   (default: current directory)
-# Exits non-zero when any ERROR-severity violation exists. WARNINGS print but do not fail,
+# Usage: bash graph-lint.sh [--explain] [repo-dir] [NODE-ID ...]   (default: current directory)
+# With --explain, every edge of the named nodes (all nodes when none are named) prints first, one
+# line each as `SRC rel TARGET "summary"`, where the summary is the first line of whatever the edge
+# points at, so a wrong target reads wrong at a glance; the normal report and exit code follow,
+# unchanged. Exits non-zero when any ERROR-severity violation exists. WARNINGS print but do not fail,
 # so this is safe as a CI gate (a broken graph fails; an advisory nudge does not).
-# Checks: dangling edges, unreadable edges, invalid kind/status, duplicate IDs, depends_on cycles,
-# transitive invalidation consistency, and that every `provenance:` path a node declares resolves.
+# Checks: dangling edges (a target is a node ID or a repo-relative path, and either must resolve),
+# unreadable edges, invalid kind/status, duplicate IDs, depends_on cycles, mutual or
+# self-referencing invalidated_by/supersedes/part_of edges, transitive invalidation consistency,
+# and that every `provenance:` path a node declares resolves.
 set -uo pipefail
-ROOT="${1:-.}"
+# `--explain` is the only flag and must come first; anywhere else it is a usage error (exit 2), so
+# a misplaced flag never lints silently as if it were a node ID or a root. After it, the first
+# argument is the repo dir only when it is an existing directory that also looks like a root: `.`,
+# `..`, anything with a slash in it, or a bare name with a graph/ inside. A bare name with neither is
+# a node ID even when a directory of that name exists, so `cd repo && graph-lint.sh --explain
+# NODE-008` renders NODE-008 whether or not a stray NODE-008/ sits beside graph/. The remaining
+# arguments are node IDs and the repo dir stays `.`. Without the flag the one optional positional is
+# the repo dir, exactly as before.
+EXPLAIN=0; EXPLAIN_IDS=""
+if [ "${1:-}" = "--explain" ]; then
+  EXPLAIN=1; shift
+  ROOT="."
+  if [ $# -gt 0 ] && [ -d "$1" ]; then
+    case "$1" in
+      .|..|*/*) ROOT="$1"; shift ;;
+      *) if [ -d "$1/graph" ]; then ROOT="$1"; shift; fi ;;
+    esac
+  fi
+  EXPLAIN_IDS="$*"
+else
+  for arg in "$@"; do
+    if [ "$arg" = "--explain" ]; then
+      echo "usage: graph-lint.sh [--explain] [repo-dir] [NODE-ID ...]   (--explain must be the first argument)" >&2
+      exit 2
+    fi
+  done
+  ROOT="${1:-.}"
+fi
 
-ROOT="$ROOT" python3 <<'PY'
-import os, sys, glob, re, subprocess
+ROOT="$ROOT" EXPLAIN="$EXPLAIN" EXPLAIN_IDS="$EXPLAIN_IDS" python3 <<'PY'
+import os, sys, glob, re, subprocess, functools
 
 root = os.environ.get("ROOT", ".")
 graphdir = os.path.join(root, "graph")
+explain = os.environ.get("EXPLAIN") == "1"
+explain_ids = list(dict.fromkeys(os.environ.get("EXPLAIN_IDS", "").split()))   # scope, in given order
 
 if not os.path.isdir(graphdir):
     print("graph-lint: no graph/ directory here; repo is not scaffolded for tendrel. Nothing to lint.")
@@ -31,6 +65,7 @@ STATUS = {
     "observation":   set(),
 }
 NODE_RE = re.compile(r"^[A-Z]+-\d+$")
+FM_RE = re.compile(r"^---\n(.*?)\n---\n?(.*)$", re.S)   # frontmatter fences, then the body
 
 def declared_edges(fm):
     """Count the list items under an `edges:` key (block-style: one `- ` per edge). Used to tell
@@ -82,6 +117,12 @@ def provenance_paths(fm):
         break
     return paths
 
+def escapes_repo(rel):
+    """True for an absolute path or one that climbs above the repo root; every path check below
+    rejects those before touching the filesystem."""
+    return os.path.isabs(rel) or os.path.normpath(rel).split(os.sep)[0] == ".."
+
+@functools.lru_cache(maxsize=None)
 def git_status(rel):
     """How git sees `rel` under root: "ignored" (matched by a .gitignore committed in the repo),
     "untracked" (present on disk but not tracked), "tracked", or "nogit" (no git, no repo).
@@ -105,6 +146,12 @@ def git_status(rel):
         return "nogit"
     return "tracked" if t.returncode == 0 else "untracked"
 
+def target_state(rel):
+    """How git sees a repo-relative path, and whether it is on disk. The edge-target and provenance
+    loops map this pair to different outcomes on purpose (an ignored edge target is silent, an
+    ignored provenance path warns), so only the lookup is shared."""
+    return git_status(rel), os.path.exists(os.path.join(root, rel))
+
 errors, warnings = [], []
 nodes = {}          # id -> record (last-wins for lookups; duplicates flagged separately)
 id_files = {}       # id -> [files]
@@ -112,7 +159,7 @@ id_files = {}       # id -> [files]
 for path in sorted(glob.glob(os.path.join(graphdir, "*.md"))):
     name = os.path.basename(path)
     text = open(path, encoding="utf-8", errors="replace").read()
-    m = re.match(r"^---\n(.*?)\n---\n?(.*)$", text, re.S)
+    m = FM_RE.match(text)
     if not m:
         errors.append(f"{name}: malformed frontmatter (missing '---' fences)")
         continue
@@ -122,15 +169,61 @@ for path in sorted(glob.glob(os.path.join(graphdir, "*.md"))):
         return mm.group(1).strip().strip('"') if mm else ""
     nid = f("id") or name[:-3]
     # Read each edge from a single line. Tolerant of harmless variation the agent or a human
-    # might introduce: extra spaces around the colons, and extra keys after `to:` (the `[^\s},]+`
-    # target capture stops at a comma or brace, so `{rel: depends_on, to: NODE-4, weight: 1}`
-    # still resolves `NODE-4`). What it deliberately does NOT accept is an edge split across
-    # lines (block-style YAML); those are caught as unreadable below. `.` never crosses a newline
-    # here (no DOTALL), so each match stays within one line.
-    edges = re.findall(r"rel\s*:\s*([a-z_]+).*?\bto\s*:\s*([^\s},]+)", fm)
+    # might introduce: extra spaces around the colons, extra keys after `to:` (a bare target ends
+    # at the first space, comma or brace, so `{rel: depends_on, to: NODE-4, weight: 1}` still
+    # resolves `NODE-4`), and YAML quotes around the target. A quoted target is captured whole, so
+    # `to: "docs/my plan.md"` keeps its space and `to: 'docs/a,b.md'` its comma; unquoted, the
+    # same names end at the space or comma (the known limit, so quote such paths). The capture
+    # keeps the quotes, and `to: "NODE-004"` is stripped to `NODE-004` here, once, before anything
+    # classifies or compares it; an empty quoted target keeps its quotes so it still reads as a
+    # missing path below and not as the repo root. What it deliberately does NOT accept is an edge
+    # split across lines (block-style YAML); those are caught as unreadable below. Neither `.` nor
+    # the quoted classes cross a newline here (no DOTALL, `\n` excluded), so each match stays
+    # within one line and an unclosed quote falls back to the bare-token reading.
+    edges = [(rel, to.strip('"\'') or to)
+             for rel, to in re.findall(
+                 r"""rel\s*:\s*([a-z_]+).*?\bto\s*:\s*("[^"\n]*"|'[^'\n]*'|[^\s},]+)""", fm)]
     id_files.setdefault(nid, []).append(name)
     nodes[nid] = {"file": name, "fm": fm, "kind": f("kind"), "status": f("status"),
                   "body": body.strip(), "edges": edges, "provenance": provenance_paths(fm)}
+
+SUMMARY_WIDTH = 80
+
+@functools.lru_cache(maxsize=None)
+def edge_summary(to):
+    """What --explain prints beside an edge target: the first non-blank line of the thing the edge
+    points at, so a wrong target reads wrong at a glance. A node target (the quote-stripped `to`
+    the loop above resolved) gives its first body line; a repo-relative file gives its first
+    non-blank line after any leading frontmatter block, read with the same fence rule as a node.
+    A file that opens a fence and never closes it gives the first non-blank line after the opening
+    `---` instead, since a bare `---` is not a summary of anything. `(empty body)` when there is no
+    such line, `(missing)` when the target is neither a node nor a
+    file the lint would accept (absolute and `..` paths included, so this never reads outside the
+    repo). Cut at SUMMARY_WIDTH characters with a trailing `...` so a long first paragraph stays one
+    line. Deterministic and read-only: the same graph always renders the same lines."""
+    if to in nodes:
+        text = nodes[to]["body"]
+    elif escapes_repo(to):
+        return "(missing)"
+    else:
+        path = os.path.join(root, to)
+        try:
+            text = open(path, encoding="utf-8", errors="replace").read()
+        except IsADirectoryError:
+            return "(directory)"
+        except OSError:
+            return "(missing)"
+        if "\x00" in text:
+            return "(binary file)"
+        m = FM_RE.match(text)
+        if m:
+            text = m.group(2)
+        elif re.match(r"^---(\n|$)", text):
+            text = text[4:]     # unclosed fence: skip the opening `---` line only
+    line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    if not line:
+        return "(empty body)"
+    return line[:SUMMARY_WIDTH] + "..." if len(line) > SUMMARY_WIDTH else line
 
 # duplicate ids
 for nid, files in id_files.items():
@@ -161,17 +254,42 @@ for nid, rec in nodes.items():
         errors.append(f"{nid}: couldn't read an edge in graph/{rec['file']}. "
                       "Write each edge on one line, e.g.  - {rel: depends_on, to: NODE-004}")
 
-# edge checks: dangling references and invalidation consistency
+# edge checks: dangling references and invalidation consistency. A target has exactly two readings:
+# it matches the node-ID pattern and must name a node in graph/, or it is a repo-relative path
+# (docs/plans/x.md, wiki/page.md, results/a.md) and must resolve the way a provenance path does,
+# through the same git_status() outcomes, with one difference. A path the repo .gitignore matches is
+# silent here, present or absent, where provenance warns: a link to a private plan document is
+# legitimate and permanent, and a warning nobody can act on is the hygiene problem this check
+# exists to remove. There is no third reading. A target that is neither a node nor a file is an
+# error that names both readings, so a lowercase node-ID typo (`node-004`) fails closed instead of
+# drifting past as an advisory. With no git at all, plain existence decides. A target that names a
+# node FILE (`graph/NODE-003.md`) is neither reading: as a path it would resolve as a present or
+# tracked file and slip past the dangling, invalidation, mutual-pair and self-loop rules, so it is
+# an error that names the ID to use instead. Fail closed, never reclassify.
+file_ids = {f: i for i, fs in id_files.items() for f in fs}
 for nid, rec in nodes.items():
     for rel, to in rec["edges"]:
-        if NODE_RE.match(to):
+        # An existing node is a node target even when its ID strays from the PREFIX-NNN pattern;
+        # the lint never validated IDs themselves, so a graph with odd IDs must not start failing
+        # on every edge to them.
+        norm = os.path.normpath(to)
+        if NODE_RE.match(to) or to in nodes:
             if to not in nodes:
                 errors.append(f"{nid}: dangling {rel} edge to missing node {to}")
-        elif to.startswith("wiki/"):
-            if not os.path.exists(os.path.join(root, to)):
-                errors.append(f"{nid}: {rel} edge to missing wiki file {to}")
+        elif escapes_repo(to):
+            errors.append(f"{nid}: {rel} edge target '{to}' must be repo-relative "
+                          "(no absolute paths, no '..')")
+        elif norm.split(os.sep)[0] == "graph" and norm.endswith(".md"):
+            base = os.path.basename(norm)
+            errors.append(f"{nid}: {rel} edge target {to} names a node file; "
+                          f"use its ID {file_ids.get(base, base[:-3])}")
         else:
-            warnings.append(f"{nid}: unrecognized {rel} edge target '{to}'")
+            status, exists = target_state(to)
+            if status != "ignored" and not exists:
+                errors.append(f"{nid}: {rel} edge target {to}: no node with this ID and no such file")
+            elif status == "untracked":
+                warnings.append(f"{nid}: {rel} edge target {to} exists but is not tracked by git; "
+                                "a clean checkout will report it missing")
         # Invalidation must propagate transitively. A node that depends_on an invalidated
         # node must be blocked; a node that depends_on an already-blocked node must also be
         # blocked. Because "blocked" itself triggers the rule, a single local pass cascades the
@@ -183,23 +301,23 @@ for nid, rec in nodes.items():
                               f"(status '{rec['status'] or 'none'}')")
 
 # provenance checks: every artifact a node declares must resolve on disk. Deterministic and
-# read-only, the same shape as the wiki/ edge check above. A path git ignores (raw/, work/, data
-# dumps) is a WARNING, not an error: it resolves on the machine that produced it and vanishes from
-# a clean checkout, so an error would turn the lint red in exactly one environment, which is the
-# kind of gate people learn to ignore. Missing and not ignored is an error: the node cites
-# something that is not there.
+# read-only, the same shape as the path-target edge check above. A path git ignores (raw/, work/,
+# data dumps) is a WARNING, not an error: it resolves on the machine that produced it and vanishes
+# from a clean checkout, so an error would turn the lint red in exactly one environment, which is
+# the kind of gate people learn to ignore. (An ignored edge target is silent instead: a cited
+# number should be reproducible from a clean checkout, a link is only a pointer.) Missing and not
+# ignored is an error: the node cites something that is not there.
 for nid, rec in nodes.items():
     for p in rec["provenance"]:
         if p.startswith("?unterminated list:"):
             errors.append(f"{nid}: couldn't read provenance in graph/{rec['file']}. "
                           "Write it as a closed inline list, e.g.  provenance: [results/a.md]")
             continue
-        if os.path.isabs(p) or os.path.normpath(p).split(os.sep)[0] == "..":
+        if escapes_repo(p):
             errors.append(f"{nid}: provenance path '{p}' must be repo-relative "
                           "(no absolute paths, no '..')")
             continue
-        status = git_status(p)
-        exists = os.path.exists(os.path.join(root, p))
+        status, exists = target_state(p)
         if status == "ignored":
             warnings.append(f"{nid}: provenance path {p} is ignored by git; it resolves here "
                             "but not from a clean checkout")
@@ -208,6 +326,27 @@ for nid, rec in nodes.items():
         elif status == "untracked":
             warnings.append(f"{nid}: provenance path {p} exists but is not tracked by git; "
                             "a clean checkout will report it missing")
+
+# mutual-pair and self-loop checks for the relations where direction carries the meaning.
+# `A invalidated_by B` and `B invalidated_by A` cannot both be true (the same goes for supersedes
+# and part_of), so a reversed pair means at least one edge is wrong: an error, not a nudge. Report
+# it once per relation and unordered pair, with the relation in the dedupe key so two relations
+# reversed between the same nodes are two findings. A self-loop is the same mistake with one node.
+# Pairwise on purpose: a longer ring (A -> B -> C -> A) is not a reversed edge, and depends_on is
+# left out here because its cycles already belong to the cycle detector below.
+DIRECTED = ("invalidated_by", "supersedes", "part_of")
+triples = {(nid, rel, to) for nid, rec in nodes.items() for rel, to in rec["edges"] if rel in DIRECTED}
+seen_pairs = set()
+for src, rel, dst in sorted(triples):
+    if src == dst:
+        errors.append(f"{src}: {rel} edge to itself; remove it.")
+    elif (dst, rel, src) in triples:
+        key = (rel, frozenset((src, dst)))
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        errors.append(f"{src} / {dst}: mutual {rel}, each claims the other. "
+                      "Direction carries the meaning here; remove whichever edge is reversed.")
 
 # depends_on cycle detection (the pipeline is meant to be a DAG)
 adj = {nid: [to for rel, to in rec["edges"] if rel == "depends_on" and to in nodes]
@@ -247,6 +386,22 @@ for cyc in found:
         continue
     seen.add(key)
     errors.append("depends_on cycle: " + " -> ".join(cyc))
+
+# explain: one line per edge with the summary of its target, printed before the report so the
+# report keeps its shape for callers that grep it. Rendering only: nothing here appends to errors
+# or warnings, and the exit code below is what it would be without the flag. Source nodes come in
+# file order, the same order `nodes` was built in; with a scope, only the named nodes' edges print.
+# A named ID that is not a node gets one note and is skipped, so a typo in the scope is visible
+# instead of rendering nothing and looking like a node without edges.
+if explain:
+    notes = [f"  (no node {i})" for i in explain_ids if i not in nodes]
+    lines = [f'  {nid} {rel} {to} "{edge_summary(to)}"'
+             for nid, rec in nodes.items() if not explain_ids or nid in explain_ids
+             for rel, to in rec["edges"]]
+    print(f"EXPLAIN ({len(lines)} edges):")
+    for ln in notes + lines:
+        print(ln)
+    print()
 
 # report
 print(f"graph-lint: {len(nodes)} node(s) in {graphdir}")
