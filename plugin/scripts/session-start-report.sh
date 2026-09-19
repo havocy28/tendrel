@@ -4,12 +4,16 @@
 # (R15/AE4 Stage-1 trigger candidate). Inert (says nothing) in repos without a graph/ dir.
 # v0.0.3: reconciliation is on-demand (this report nudges); the per-turn Stop block was removed.
 # v0.4.0: honors optional `verbosity` (succinct | normal | off) from .research-graph; absent -> normal.
+# v0.10.0: lists deferred items whose reopen trigger has fired and counts the rest (R13), read from
+# `graph-lint.sh --precheck` beside this script so "fired" is the lint's word, never a second
+# evaluator; when the lint is not beside it, the report prints exactly what it printed before.
 set -euo pipefail
 DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.research-graph-data}"
+LINT="$(dirname "$0")/graph-lint.sh"
 payload="$(cat || true)"
 
-DATA="$DATA" PAYLOAD="$payload" python3 <<'PY'
-import os, sys, json, glob, re
+DATA="$DATA" LINT="$LINT" PAYLOAD="$payload" python3 <<'PY'
+import os, sys, json, glob, re, subprocess
 
 data = os.environ.get("DATA", "")
 payload = os.environ.get("PAYLOAD", "") or "{}"
@@ -89,6 +93,35 @@ if open_theories:
     info_lines.append("Open theories: " + ", ".join(f"{n} ({s})" for n, s in open_theories))
 if weak_nodes:
     info_lines.append("Unvalidated/blocked pipeline nodes: " + ", ".join(f"{n} ({s})" for n, s in weak_nodes))
+# Deferred items (R13): info-level, one line naming every item whose node-form trigger has fired
+# and one count of the rest. Kept apart from info_lines because these never print under `off`,
+# even with reconcile = auto (KTD6: a fired trigger is not confidently wrong, and `next` carries
+# it). The lint's --precheck is the only evaluator: its DEFERRED and FIRED lines are read as-is
+# and its exit code is ignored, since the block prints whether or not the graph has errors. The
+# lint runs only when this parse saw a deferred status, so a graph without one costs nothing
+# extra at session start and prints exactly what it printed before; the same holds when the lint
+# is not beside this script.
+deferred_lines = []
+lint = os.environ.get("LINT", "")
+if any(v["status"] == "deferred" for v in nodes.values()) and os.path.isfile(lint):
+    try:
+        out = subprocess.run(["bash", lint, "--precheck", cwd], capture_output=True,
+                             text=True, timeout=60).stdout
+    except Exception:
+        out = ""
+    block = out.split("PRECHECK:\n", 1)[1].split("\n\n", 1)[0] if "PRECHECK:\n" in out else ""
+    deferred, fired = [], []
+    for ln in block.split("\n"):
+        tok = ln.split(" ", 3)
+        if tok[0] == "DEFERRED" and len(tok) > 1:
+            deferred.append(tok[1])
+        elif tok[0] == "FIRED" and len(tok) == 4:
+            fired.append((tok[1], tok[2], tok[3]))
+    if fired:
+        deferred_lines.append("Deferred, trigger fired: "
+                              + ", ".join(f"{n} ({node} {st})" for n, node, st in fired))
+    if len(deferred) > len(fired):
+        deferred_lines.append(f"Deferred, waiting: {len(deferred) - len(fired)} item(s)")
 footer = ("Reconcile on demand: say \"reconcile the graph\" to fold recent work into graph/ "
           "per the research-graph skill. (Reconciliation is no longer auto-fired every turn — "
           "it will not interrupt you mid-task.)")
@@ -107,7 +140,8 @@ if verbosity == "off":
     # since the Stop hook was removed in 0.0.3. Under auto, ANY drift (warn or info) carries the
     # instruction plus its evidence: stale statuses are info-level and are the primary reason to
     # set auto, and the emitted lines are injected agent context, not a printed banner, so this
-    # costs the user nothing visible. A repo with no drift at all stays silent.
+    # costs the user nothing visible. A repo with no drift at all stays silent. Deferred lines
+    # never print here (R13): off users learn of a fired trigger through `next`.
     if reconcile == "auto" and (warn_lines or info_lines):
         emit("\n".join(warn_lines + info_lines + [footer]))
     else:
@@ -115,8 +149,8 @@ if verbosity == "off":
 elif verbosity == "succinct":
     # Under auto the instruction always rides: succinct trims chrome, not behavior. (Unlike the
     # off branch above, no drift guard: succinct already emits the header regardless.)
-    emit("\n".join([header] + warn_lines + info_lines
+    emit("\n".join([header] + warn_lines + info_lines + deferred_lines
                    + ([footer] if reconcile == "auto" else [])))
 else:  # normal, and any absent or unknown value: byte-identical to pre-0.4.0 output
-    emit("\n".join([header] + warn_lines + info_lines + [footer]))
+    emit("\n".join([header] + warn_lines + info_lines + deferred_lines + [footer]))
 PY
