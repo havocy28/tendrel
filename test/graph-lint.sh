@@ -1397,5 +1397,215 @@ OUT="$(bash "$LINT" "$d" --explain 2>&1)"; RC=$?
   && ! echo "$OUT" | grep -q "error(s)"; } \
   && ok "--explain after the root -> usage error, exit 2, no report" || no "--explain not first" "rc=$RC out=$OUT"
 
+# 60. R8, first half: a planned experiment that carries a `config` and no `abandon_if` warns (the run
+#     is specified well enough to pre-register its exit, so the nag lands where the habit matters);
+#     the same experiment without a `config` is silent. Warn only: exit 0 both ways.
+d="$(newfix)"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: planned
+question: "Does k=20 beat k=10?"
+config: {retriever: hybrid, k: 20}
+---
+Planned with a config and no exit.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "W EXP-001: .*abandon_if"; } \
+  && ok "planned experiment with a config and no abandon_if -> warning, exit 0" \
+  || no "planned + config + no abandon_if warns" "rc=$RC out=$OUT"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: planned
+question: "Does k=20 beat k=10?"
+---
+Planned, no config: nothing to pre-register yet.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "abandon_if" && echo "$OUT" | grep -q "0 warning(s)"; } \
+  && ok "planned experiment with no config -> silent about abandon_if" \
+  || no "planned + no config silent" "rc=$RC out=$OUT"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: planned
+question: "Does k=20 beat k=10?"
+config: {retriever: hybrid, k: 20}
+abandon_if: "nDCG@10 gain under 2 pts at n=200"
+---
+Planned with a config and a pre-registered exit.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "0 warning(s)"; } \
+  && ok "planned experiment with a config and an abandon_if -> silent" \
+  || no "planned + config + abandon_if silent" "rc=$RC out=$OUT"
+
+# 61. R8, second half: a complete experiment that carries a `validates` edge and no `compared_to`
+#     warns and still exits 0 when nothing else is wrong; with a `compared_to` it is silent.
+d="$(newfix)"
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: backtest
+---
+Hybrid beats vector-only.'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "Does hybrid beat vector-only?"
+result: "+10 pts"
+edges:
+  - {rel: validates, to: THEORY-001}
+---
+Validates the theory but names no null.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "W EXP-001: .*compared_to" && echo "$OUT" | grep -q "1 warning(s)"; } \
+  && ok "complete experiment with validates and no compared_to -> warning, exit 0" \
+  || no "complete + validates + no compared_to warns" "rc=$RC out=$OUT"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "Does hybrid beat vector-only?"
+result: "+10 pts"
+compared_to: "vector-only retriever, same k and n"
+edges:
+  - {rel: validates, to: THEORY-001}
+---
+Validates the theory and names the comparison.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "0 warning(s)"; } \
+  && ok "complete experiment with validates and a compared_to -> silent" \
+  || no "complete + validates + compared_to silent" "rc=$RC out=$OUT"
+
+# 62. `deferred` is an additive status for ideas and experiments only: both lint clean; on a theory
+#     it is still an invalid status (deferred is a choice, blocked is a consequence, and a theory is
+#     neither: it is shelved).
+d="$(newfix)"
+node "$d" IDEA-001.md '---
+id: IDEA-001
+kind: idea
+status: deferred
+---
+Parked until the case count moves.'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: deferred
+question: "Does the bound tighten with more cases?"
+---
+Parked behind the same event.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -q "invalid status"; } \
+  && ok "status: deferred on an idea and an experiment -> lints clean" \
+  || no "deferred idea and experiment clean" "rc=$RC out=$OUT"
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: deferred
+---
+A theory cannot be deferred.'
+runlint "$d"
+{ [ "$RC" -eq 1 ] && echo "$OUT" | grep -q "E THEORY-001: invalid status 'deferred' for kind theory"; } \
+  && ok "status: deferred on a theory -> invalid status error, exit 1" \
+  || no "deferred theory errors" "rc=$RC out=$OUT"
+
+# 63. R20: a node-form `reopen_when` (exactly `<NODE-ID> <status>`) whose node does not exist warns;
+#     the same form naming an existing node is silent; a text trigger is never checked, even when it
+#     happens to mention an ID that does not exist. A bare ID with no status is not the node form
+#     either, so it reads as text and is silent. Warn only: exit 0 throughout.
+d="$(newfix)"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: running
+question: "Does the reranker help?"
+---
+Running.'
+node "$d" IDEA-001.md '---
+id: IDEA-001
+kind: idea
+status: deferred
+reopen_when: EXP-999 complete
+---
+Waiting on a run that is not in the graph.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "W IDEA-001: reopen_when .*EXP-999"; } \
+  && ok "node-form reopen_when naming a missing node -> warning, exit 0" \
+  || no "reopen_when missing node warns" "rc=$RC out=$OUT"
+node "$d" IDEA-001.md '---
+id: IDEA-001
+kind: idea
+status: deferred
+reopen_when: "EXP-001 complete"
+---
+Waiting on the reranker run.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "0 warning(s)"; } \
+  && ok "node-form reopen_when naming an existing node -> silent" \
+  || no "reopen_when existing node silent" "rc=$RC out=$OUT"
+node "$d" IDEA-001.md '---
+id: IDEA-001
+kind: idea
+status: deferred
+reopen_when: "when the case count passes 500 or EXP-999 lands"
+---
+A text trigger: listed, never evaluated.'
+node "$d" IDEA-002.md '---
+id: IDEA-002
+kind: idea
+status: deferred
+reopen_when: EXP-999
+---
+A bare ID with no status is not the node form.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "0 warning(s)"; } \
+  && ok "text reopen_when triggers (prose, bare ID) -> never checked, silent" \
+  || no "text reopen_when silent" "rc=$RC out=$OUT"
+
+# 64. The four exit-side fields and `reopen_when` are flat optional keys the lint reads and never
+#     rejects: a complete experiment carrying all four lints clean, and an `exit_outcome` outside
+#     crossed or overridden (`maybe`) lints clean too (it is read as absent, fail-closed to inert).
+d="$(newfix)"
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: backtest
+---
+Hybrid beats vector-only.'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "Does hybrid beat vector-only?"
+config: {retriever: hybrid, k: 10}
+result: "+1 pt, inside the bound"
+abandon_if: "gain under 2 pts at n=200"
+compared_to: "vector-only retriever"
+bound: "2 pts nDCG@10"
+exit_outcome: crossed
+edges:
+  - {rel: validates, to: THEORY-001}
+---
+Crossed its own exit; recorded on the marker, the run stays complete.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "clean: no integrity problems found"; } \
+  && ok "complete experiment with all four exit-side fields -> clean" \
+  || no "all four exit fields clean" "rc=$RC out=$OUT"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "Does hybrid beat vector-only?"
+compared_to: "vector-only retriever"
+exit_outcome: maybe
+edges:
+  - {rel: validates, to: THEORY-001}
+---
+An unrecognized exit_outcome is read as absent, never as an error.'
+runlint "$d"
+{ [ "$RC" -eq 0 ] && echo "$OUT" | grep -q "clean: no integrity problems found"; } \
+  && ok "exit_outcome: maybe -> lints clean (read as absent)" \
+  || no "exit_outcome maybe clean" "rc=$RC out=$OUT"
+
 echo "---"; echo "graph-lint test: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

@@ -53,19 +53,34 @@ if not os.path.isdir(graphdir):
     sys.exit(0)
 
 # Source of truth for the node model is the "Node kinds, statuses, IDs" table in
-# plugin/skills/research-graph/SKILL.md. These sets and session-start-report.sh mirror it; if that
-# table changes, update both scripts or the lint will reject valid nodes (or accept invalid ones).
+# plugin/skills/research-graph/SKILL.md. These sets mirror that table alone (session-start-report.sh
+# names a few status strings inline but carries no dictionary); if the table changes, update these
+# sets or the lint will reject valid nodes (or accept invalid ones). `deferred` is a choice, not a
+# consequence, so it belongs to ideas and experiments only: a parked theory is `shelved`.
 KINDS = {"experiment", "theory", "pipeline_node", "decision", "idea", "observation"}
 STATUS = {
-    "experiment":    {"planned", "running", "complete", "abandoned"},
+    "experiment":    {"planned", "running", "complete", "abandoned", "deferred"},
     "theory":        {"idea", "backtest", "paper_trade", "live_small", "live_full", "shelved"},
     "pipeline_node": {"untested", "assumed_working", "validated", "invalidated", "blocked"},
     "decision":      {"active", "under_review", "reversed"},
-    "idea":          {"open", "promoted", "dropped"},
+    "idea":          {"open", "promoted", "dropped", "deferred"},
     "observation":   set(),
 }
 NODE_RE = re.compile(r"^[A-Z]+-\d+$")
 FM_RE = re.compile(r"^---\n(.*?)\n---\n?(.*)$", re.S)   # frontmatter fences, then the body
+EXIT_OUTCOMES = {"crossed", "overridden"}   # any other `exit_outcome` value reads as absent
+# The node form of `reopen_when` is exactly `<NODE-ID> <status>` and nothing else: one ID, one
+# status token. Anything that does not match is a text trigger, which is listed by the tools that
+# read it and never evaluated by a script, so a sentence that happens to mention an ID is never
+# mistaken for a machine-checkable trigger.
+REOPEN_RE = re.compile(r"^([A-Z]+-\d+)\s+([a-z_]+)$")
+
+def reopen_trigger(value):
+    """(node_id, status) when `value` is a node-form reopen trigger, else None for a text trigger
+    or an absent key. The one evaluator both the lint and its consumers read, so "fired" means the
+    same thing everywhere."""
+    m = REOPEN_RE.match(value)
+    return (m.group(1), m.group(2)) if m else None
 
 def declared_edges(fm):
     """Count the list items under an `edges:` key (block-style: one `- ` per edge). Used to tell
@@ -184,8 +199,18 @@ for path in sorted(glob.glob(os.path.join(graphdir, "*.md"))):
              for rel, to in re.findall(
                  r"""rel\s*:\s*([a-z_]+).*?\bto\s*:\s*("[^"\n]*"|'[^'\n]*'|[^\s},]+)""", fm)]
     id_files.setdefault(nid, []).append(name)
+    # The exit-side fields (`abandon_if`, `compared_to`, `bound`, `exit_outcome`) and `reopen_when`
+    # are flat optional keys read the same way as every other key: absent reads as "", so a node
+    # without them behaves exactly as before. `exit_outcome` is the one value-checked key: outside
+    # crossed or overridden it is stored as absent, never reported, so a typo is inert rather than
+    # an error on an otherwise valid node.
+    exit_outcome = f("exit_outcome")
     nodes[nid] = {"file": name, "fm": fm, "kind": f("kind"), "status": f("status"),
-                  "body": body.strip(), "edges": edges, "provenance": provenance_paths(fm)}
+                  "body": body.strip(), "edges": edges, "provenance": provenance_paths(fm),
+                  "abandon_if": f("abandon_if"), "compared_to": f("compared_to"),
+                  "bound": f("bound"),
+                  "exit_outcome": exit_outcome if exit_outcome in EXIT_OUTCOMES else "",
+                  "reopen_when": f("reopen_when")}
 
 SUMMARY_WIDTH = 80
 
@@ -244,6 +269,20 @@ for nid, rec in nodes.items():
             warnings.append(f"{nid}: missing status")
         if kind == "experiment" and not re.search(r"^question:\s*\S", rec["fm"], re.M):
             warnings.append(f"{nid}: experiment missing 'question'")
+        # Exit hygiene, warn only. A planned experiment that already carries a `config` is specified
+        # well enough to pre-register the number or outcome that would end the line, so the nudge
+        # lands there and nowhere else: a planned node with no config is still being shaped, and
+        # nagging it would teach people to ignore the warning. A complete experiment whose
+        # `validates` edge claims support for something should name the null or comparison group
+        # its result beat; without `compared_to` the brief cannot tell a real gain from a rerun.
+        if kind == "experiment" and status == "planned" and not rec["abandon_if"] \
+                and re.search(r"^config\s*:", rec["fm"], re.M):
+            warnings.append(f"{nid}: planned experiment has a config but no 'abandon_if' "
+                            "(pre-register what would end this line before running it)")
+        if kind == "experiment" and status == "complete" and not rec["compared_to"] \
+                and any(rel == "validates" for rel, _ in rec["edges"]):
+            warnings.append(f"{nid}: complete experiment validates something but names no "
+                            "'compared_to' (the null or comparison group the result beat)")
     if not rec["body"]:
         warnings.append(f"{nid}: empty body (claimed but unlogged)")
     # Count how many edges the node declares (list items under `edges:`) versus how many we could
@@ -253,6 +292,16 @@ for nid, rec in nodes.items():
     if declared_edges(rec["fm"]) > len(rec["edges"]):
         errors.append(f"{nid}: couldn't read an edge in graph/{rec['file']}. "
                       "Write each edge on one line, e.g.  - {rel: depends_on, to: NODE-004}")
+
+# reopen triggers: a node-form `reopen_when` names a node that must exist, or the trigger can never
+# fire and the deferred item is parked forever behind a typo. Warn only, the same weight as the
+# other hygiene nudges, and only for the node form: a text trigger is a sentence for a person to
+# judge, and this lint never evaluates it, so it is never checked here either.
+for nid, rec in nodes.items():
+    trig = reopen_trigger(rec["reopen_when"])
+    if trig and trig[0] not in nodes:
+        warnings.append(f"{nid}: reopen_when names missing node {trig[0]} "
+                        f"(the trigger '{rec['reopen_when']}' can never fire)")
 
 # edge checks: dangling references and invalidation consistency. A target has exactly two readings:
 # it matches the node-ID pattern and must name a node in graph/, or it is a repo-relative path
