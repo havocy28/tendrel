@@ -217,9 +217,12 @@ When `reconcile = auto`, the user has chosen unattended reconcile writes for thi
   result is free text; nothing deterministic decides this). When it crossed, propose writing
   `exit_outcome: crossed`, with the crossed value in the body, as a separate yes or no at the end
   of the turn: never bundled into a batch approval, and never applied under any `reconcile`
-  value. The experiment stays `complete` with its real result either way. A decline writes
-  `exit_outcome: overridden` with the reason in the body, so the exit is never re-raised. Ending
-  the line (dropping the idea, shelving the theory) is a further, separate proposal.
+  value. A narrated result is never a yes: when the user reports the number and even says it fell
+  below the line, that is the result being logged, not an answer to a proposal you have not made
+  yet, so write the marker only after they answer the yes or no. The experiment stays `complete`
+  with its real result either way. A decline writes `exit_outcome: overridden` with the reason in
+  the body, so the exit is never re-raised. Ending the line (dropping the idea, shelving the
+  theory) is a further, separate proposal.
 - Reopening stays approval-gated even under `auto`. A fired trigger (the pre-check's `FIRED` line,
   or the session-start report's "Deferred, trigger fired" line) is proposed, never applied, under
   every `reconcile` value: propose moving the item back to `open` or `planned`, and leave it

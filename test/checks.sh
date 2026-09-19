@@ -102,6 +102,10 @@ grep -qF 'Verdict rests on:' "$S" && ok "Verdict rests on: footer line pinned in
 # KD6/KD11: exit_outcome and reopening are proposed under every reconcile value, including auto
 grep -qF 'never applied' "$S" && ok "exit marker never-applied rule present in SKILL.md" \
   || no "exit marker never-applied rule present in SKILL.md" "'never applied' keeps exit_outcome propose-only under auto"
+# A user narrating a crossed number is logging a result, not answering a proposal; the exit-reopen
+# harness caught the sweep writing the marker on that narration (ask arm, 1 of 5) before this line.
+grep -qF 'A narrated result is never a yes' "$S" && ok "narrated-result-is-not-consent rule present in SKILL.md" \
+  || no "narrated-result-is-not-consent rule present in SKILL.md" "the exit-reopen harness NO_MARKER gate depends on it"
 # R11: a deferral the scripts can see is a status plus reopen_when, not prose in the body
 grep -qF 'A deferral is a status and a trigger' "$S" && ok "deferral-is-status-and-trigger rule present in SKILL.md" \
   || no "deferral-is-status-and-trigger rule present in SKILL.md" "a body-note deferral is invisible to the pre-check"
