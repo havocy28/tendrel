@@ -365,7 +365,7 @@ quoted_block(){
        END { if (!last) exit; s=st[last]; sub(/^Pre-check:[*_]*[[:space:]]*/, "", s); if (s ~ /[^[:space:]]/) print s
              for (i=last+1; i<=NR; i++) { if (st[i] ~ /^Verdict rests on:/) break; print a[i] } }'
 }
-norm_block(){ grep -vE '^[[:space:]]*```' | sed -E 's/^[[:space:]#*_>-]*//; s/`//g; s/[[:space:]]+/ /g; s/ $//' | grep -v '^$'; }
+norm_block(){ grep -vE '^[[:space:]]*```' | strip_markup | sed -E 's/`//g; s/[[:space:]]+/ /g; s/ $//' | grep -v '^$'; }
 expected_block(){ # $1=fixture dir -> the lint's PRECHECK block, header through the last line before its blank
   local out; out=$(bash "$LINT" --precheck "$1" 2>/dev/null)
   printf '%s\n' "$out" | awk '/^PRECHECK:/ {on=1} on && !NF {exit} on {print}'

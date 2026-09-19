@@ -478,10 +478,11 @@ a synthesis of *history into next steps*. It is read-only: it proposes, it never
    text, missing (listed as `(no trigger)`), or names a node that does not exist; read it yourself
    and say what you decided.
 
-   Two evidence rules, both taken from the lint's warnings rather than re-derived: a null result
-   with no `bound` is uninformative, so never cite it to conclude a line or to refute anything (it
-   excludes no effect size); a `validates` edge from an experiment with no `compared_to` is
-   provisional support, and the brief says so. Whether a result is a null stays a judgment.
+   Two evidence rules: a null result with no `bound` in its frontmatter is uninformative, so never
+   cite it to conclude a line or to refute anything (it excludes no effect size); a `validates`
+   edge from an experiment with no `compared_to` is provisional support, and the brief says so.
+   Take the second list from the lint's warning rather than re-deriving it; the first is a
+   frontmatter read. Whether a result is a null stays a judgment.
 
    Deferred items go under a heading "Waiting on", each with its trigger in plain language. Never
    propose a deferred item unless the pre-check printed `FIRED` for it or, for a text trigger, you

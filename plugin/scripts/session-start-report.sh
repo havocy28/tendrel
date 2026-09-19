@@ -103,7 +103,8 @@ if weak_nodes:
 # is not beside this script.
 deferred_lines = []
 lint = os.environ.get("LINT", "")
-if any(v["status"] == "deferred" for v in nodes.values()) and os.path.isfile(lint):
+# Under verbosity = off nothing about deferred items prints, so the lint is not asked.
+if verbosity != "off" and any(v["status"] == "deferred" for v in nodes.values()) and os.path.isfile(lint):
     try:
         out = subprocess.run(["bash", lint, "--precheck", cwd], capture_output=True,
                              text=True, timeout=60).stdout

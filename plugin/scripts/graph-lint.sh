@@ -79,15 +79,16 @@ STATUS = {
     "idea":          {"open", "promoted", "dropped", "deferred"},
     "observation":   set(),
 }
-NODE_RE = re.compile(r"^[A-Z]+-\d+$")
-NODE_MENTION_RE = re.compile(r"\b[A-Z]+-\d+\b")   # NODE_RE unanchored: IDs mentioned inside prose
+NODE_ID = r"[A-Z]+-\d+"   # the one definition of what a node ID looks like
+NODE_RE = re.compile(rf"^{NODE_ID}$")
+NODE_MENTION_RE = re.compile(rf"\b{NODE_ID}\b")   # NODE_RE unanchored: IDs mentioned inside prose
 FM_RE = re.compile(r"^---\n(.*?)\n---\n?(.*)$", re.S)   # frontmatter fences, then the body
 EXIT_OUTCOMES = {"crossed", "overridden"}   # any other `exit_outcome` value reads as absent
 # The node form of `reopen_when` is exactly `<NODE-ID> <status>` and nothing else: one ID, one
 # status token. Anything that does not match is a text trigger, which is listed by the tools that
 # read it and never evaluated by a script, so a sentence that happens to mention an ID is never
 # mistaken for a machine-checkable trigger.
-REOPEN_RE = re.compile(r"^([A-Z]+-\d+)\s+([a-z_]+)$")
+REOPEN_RE = re.compile(rf"^({NODE_ID})\s+([a-z_]+)$")
 
 def reopen_trigger(value):
     """(node_id, status) when `value` is a node-form reopen trigger, else None for a text trigger
@@ -533,14 +534,15 @@ if precheck:
     # blocks it (there is still a next step); theories never enter the rule either way; a promoted
     # or dropped idea and a complete or abandoned run block nothing. With a text or missing trigger
     # the count of triggers needing judgment prints instead, and the verdict is the model's.
-    blocking = any((rec["kind"] == "idea" and rec["status"] == "open")
-                   or (rec["kind"] == "experiment" and rec["status"] in ("planned", "running"))
-                   for rec in nodes.values())
-    if deferred and not blocking:
-        if judgment:
-            findings.append(f"JUDGMENT {judgment} triggers need judgment")
-        elif not fired:
-            findings.append(f"FUTILITY {len(deferred)} deferred, all node-form, none fired")
+    if deferred:
+        blocking = any((rec["kind"] == "idea" and rec["status"] == "open")
+                       or (rec["kind"] == "experiment" and rec["status"] in ("planned", "running"))
+                       for rec in nodes.values())
+        if not blocking:
+            if judgment:
+                findings.append(f"JUDGMENT {judgment} triggers need judgment")
+            elif not fired:
+                findings.append(f"FUTILITY {len(deferred)} deferred, all node-form, none fired")
     print("PRECHECK:")
     for ln in findings:
         print(ln)
