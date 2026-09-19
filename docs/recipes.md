@@ -96,3 +96,35 @@ each with why it's the right move now and what to skip because the graph already
 reads like a colleague catching you up, not a list of node IDs, and it writes nothing: it is advice
 you act on, not state on disk. A skippable "Where this came from" footer maps each claim back to the
 nodes behind it if you want to check one.
+
+## Park a design until the count moves
+
+You have an idea or a planned experiment that isn't worth running yet, not because it's wrong but
+because the sample size or the outside event it needs hasn't happened. Tell the agent, or
+reconcile:
+
+> "Park the reranker idea until we have 500 more labeled queries."
+
+The agent sets `status: deferred` and writes `reopen_when`. When the trigger is another node
+reaching a status, write it as the node form (`reopen_when: EXP-003 complete`), which the lint and
+`next` evaluate directly; anything else is a text trigger, listed but never evaluated by a script.
+`/tendrel:status` lists the item under "Deferred, reopen when" with its trigger, and a later
+`/tendrel:next` shows it under "Waiting on" rather than proposing it. Once the trigger fires, you
+don't have to remember to check: the next session-start report names it, "Deferred, trigger fired:
+..." and counts whatever is still waiting.
+
+## Ask whether to stop
+
+Sometimes the honest answer to "what next" isn't another experiment. Ask `/tendrel:next` as usual:
+
+> "What should we run next?"
+
+The brief now ends in exactly one verdict. `Verdict: continue` means the pre-check found nothing
+decisive and the model judged there's still a discriminating experiment to run; you get the usual
+2-3 proposals. `Verdict: conclude` means the evidence already settles the line: read what stands,
+what it rests on, and what would reopen it, and stop spending on it. `Verdict: wait` means
+everything open is parked behind a trigger that hasn't fired: read what unlocks the work. The
+footer's `Pre-check:` block is the deterministic half of that call, quoted verbatim, so you can see
+which stale gate, pending exit, or fired trigger drove it before trusting the model's half. When
+you do start the next experiment, write its losing outcome down first, as `abandon_if`: the number
+or result that would make you drop the line, agreed before you run it, not rationalized after.
