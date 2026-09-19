@@ -1,27 +1,45 @@
 #!/usr/bin/env bash
 # Deterministic graph-integrity lint for tendrel. Read-only: it never writes to graph/.
-# Usage: bash graph-lint.sh [--explain] [repo-dir] [NODE-ID ...]   (default: current directory)
+# Usage: bash graph-lint.sh [--explain] [--precheck] [repo-dir] [NODE-ID ...]   (default: current directory)
 # With --explain, every edge of the named nodes (all nodes when none are named) prints first, one
 # line each as `SRC rel TARGET "summary"`, where the summary is the first line of whatever the edge
 # points at, so a wrong target reads wrong at a glance; the normal report and exit code follow,
-# unchanged. Exits non-zero when any ERROR-severity violation exists. WARNINGS print but do not fail,
-# so this is safe as a CI gate (a broken graph fails; an advisory nudge does not).
+# unchanged. With --precheck, a `PRECHECK:` block prints first (after the EXPLAIN block when both
+# are given): one line per stale gate, pending or crossed exit, deferred item, fired reopen trigger,
+# and a futility or judgment summary, each with a stable first token so `next` can quote it; the
+# report and exit code follow, unchanged. Exits non-zero when any ERROR-severity violation exists.
+# WARNINGS print but do not fail, so this is safe as a CI gate (a broken graph fails; an advisory
+# nudge does not).
 # Checks: dangling edges (a target is a node ID or a repo-relative path, and either must resolve),
 # unreadable edges, invalid kind/status, duplicate IDs, depends_on cycles, mutual or
 # self-referencing invalidated_by/supersedes/part_of edges, transitive invalidation consistency,
 # and that every `provenance:` path a node declares resolves.
 set -uo pipefail
-# `--explain` is the only flag and must come first; anywhere else it is a usage error (exit 2), so
-# a misplaced flag never lints silently as if it were a node ID or a root. After it, the first
-# argument is the repo dir only when it is an existing directory that also looks like a root: `.`,
-# `..`, anything with a slash in it, or a bare name with a graph/ inside. A bare name with neither is
-# a node ID even when a directory of that name exists, so `cd repo && graph-lint.sh --explain
-# NODE-008` renders NODE-008 whether or not a stray NODE-008/ sits beside graph/. The remaining
-# arguments are node IDs and the repo dir stays `.`. Without the flag the one optional positional is
-# the repo dir, exactly as before.
-EXPLAIN=0; EXPLAIN_IDS=""
-if [ "${1:-}" = "--explain" ]; then
-  EXPLAIN=1; shift
+# `--explain` and `--precheck` form a leading flag block, in either order; a flag after any
+# positional is a usage error (exit 2), so a misplaced flag never lints silently as if it were a
+# node ID or a root. When `--explain` is among the flags, the first positional is the repo dir only
+# when it is an existing directory that also looks like a root: `.`, `..`, anything with a slash in
+# it, or a bare name with a graph/ inside. A bare name with neither is a node ID even when a
+# directory of that name exists, so `cd repo && graph-lint.sh --explain NODE-008` renders NODE-008
+# whether or not a stray NODE-008/ sits beside graph/. The remaining arguments are node IDs and the
+# repo dir stays `.`. Without `--explain` the one optional positional is the repo dir, exactly as
+# before, whether or not `--precheck` is given.
+usage(){
+  echo "usage: graph-lint.sh [--explain] [--precheck] [repo-dir] [NODE-ID ...]   (flags must come before any other argument)" >&2
+  exit 2
+}
+EXPLAIN=0; PRECHECK=0; EXPLAIN_IDS=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --explain) EXPLAIN=1; shift ;;
+    --precheck) PRECHECK=1; shift ;;
+    *) break ;;
+  esac
+done
+for arg in "$@"; do
+  case "$arg" in --explain|--precheck) usage ;; esac
+done
+if [ "$EXPLAIN" -eq 1 ]; then
   ROOT="."
   if [ $# -gt 0 ] && [ -d "$1" ]; then
     case "$1" in
@@ -31,21 +49,16 @@ if [ "${1:-}" = "--explain" ]; then
   fi
   EXPLAIN_IDS="$*"
 else
-  for arg in "$@"; do
-    if [ "$arg" = "--explain" ]; then
-      echo "usage: graph-lint.sh [--explain] [repo-dir] [NODE-ID ...]   (--explain must be the first argument)" >&2
-      exit 2
-    fi
-  done
   ROOT="${1:-.}"
 fi
 
-ROOT="$ROOT" EXPLAIN="$EXPLAIN" EXPLAIN_IDS="$EXPLAIN_IDS" python3 <<'PY'
+ROOT="$ROOT" EXPLAIN="$EXPLAIN" PRECHECK="$PRECHECK" EXPLAIN_IDS="$EXPLAIN_IDS" python3 <<'PY'
 import os, sys, glob, re, subprocess, functools
 
 root = os.environ.get("ROOT", ".")
 graphdir = os.path.join(root, "graph")
 explain = os.environ.get("EXPLAIN") == "1"
+precheck = os.environ.get("PRECHECK") == "1"
 explain_ids = list(dict.fromkeys(os.environ.get("EXPLAIN_IDS", "").split()))   # scope, in given order
 
 if not os.path.isdir(graphdir):
@@ -67,6 +80,7 @@ STATUS = {
     "observation":   set(),
 }
 NODE_RE = re.compile(r"^[A-Z]+-\d+$")
+NODE_MENTION_RE = re.compile(r"\b[A-Z]+-\d+\b")   # NODE_RE unanchored: IDs mentioned inside prose
 FM_RE = re.compile(r"^---\n(.*?)\n---\n?(.*)$", re.S)   # frontmatter fences, then the body
 EXIT_OUTCOMES = {"crossed", "overridden"}   # any other `exit_outcome` value reads as absent
 # The node form of `reopen_when` is exactly `<NODE-ID> <status>` and nothing else: one ID, one
@@ -203,14 +217,17 @@ for path in sorted(glob.glob(os.path.join(graphdir, "*.md"))):
     # are flat optional keys read the same way as every other key: absent reads as "", so a node
     # without them behaves exactly as before. `exit_outcome` is the one value-checked key: outside
     # crossed or overridden it is stored as absent, never reported, so a typo is inert rather than
-    # an error on an otherwise valid node.
+    # an error on an otherwise valid node. `next_gate` and `result` are read the same way for the
+    # pre-check only; the lint itself never checks them. All of these are one-line values: a block
+    # scalar (`key: |`) reads as its marker, which is empty for every purpose below.
     exit_outcome = f("exit_outcome")
     nodes[nid] = {"file": name, "fm": fm, "kind": f("kind"), "status": f("status"),
                   "body": body.strip(), "edges": edges, "provenance": provenance_paths(fm),
                   "abandon_if": f("abandon_if"), "compared_to": f("compared_to"),
                   "bound": f("bound"),
                   "exit_outcome": exit_outcome if exit_outcome in EXIT_OUTCOMES else "",
-                  "reopen_when": f("reopen_when")}
+                  "reopen_when": f("reopen_when"),
+                  "next_gate": f("next_gate"), "result": f("result")}
 
 SUMMARY_WIDTH = 80
 
@@ -450,6 +467,85 @@ if explain:
     print(f"EXPLAIN ({len(lines)} edges):")
     for ln in notes + lines:
         print(ln)
+    print()
+
+# precheck: the deterministic half of the `next` verdict. Enumerates, never judges: every line here
+# is a fact of current frontmatter and edges (a gate names a node that is finished, a complete run
+# carries an exit nobody has resolved, a deferred item's trigger names a node that holds the named
+# status), so the block reads the same from any checkout of the same commit. Whether a result
+# crossed its exit, or a gate that names a finished node has actually been met, is the model's call
+# from the quoted lines. Rendering only, like --explain: nothing here appends to errors or warnings,
+# the exit code is the lint's. Node order is file order, the same order `nodes` was built in.
+TERMINAL = {"complete", "validated", "abandoned", "invalidated"}
+if precheck:
+    findings = []      # every line of the block, in print order; GATE_CONTEXT lines are context only
+    # Reverse adjacency for part_of and motivated_by, the same shape as the depends_on `adj` below:
+    # theory id -> the experiments that attach to it. Only edges FROM an experiment count; a theory
+    # that points at an experiment is citing it, not being served by it.
+    attached = {nid: [] for nid in nodes}
+    for nid, rec in nodes.items():
+        if rec["kind"] != "experiment":
+            continue
+        for rel, to in rec["edges"]:
+            if rel in ("part_of", "motivated_by") and to in nodes:
+                attached[to].append(nid)
+    # Stale gate (KTD3): a substring match of node IDs inside `next_gate`, kept only when the ID is
+    # a node of this graph and that node is in a terminal status. No meaning is read from the text,
+    # so a gate that cites a finished run as the baseline to beat is flagged too; that shape is the
+    # known false positive, pinned in the fixtures, and the brief reads the gate text to say so.
+    # Shelved theories are skipped entirely: their gate is nobody's next step.
+    for nid, rec in nodes.items():
+        if rec["kind"] != "theory" or rec["status"] == "shelved":
+            continue
+        for mention in dict.fromkeys(NODE_MENTION_RE.findall(rec["next_gate"])):
+            if mention in nodes and nodes[mention]["status"] in TERMINAL:
+                findings.append(f"STALE_GATE {nid} {mention} {nodes[mention]['status']}")
+        done = sum(1 for e in attached[nid] if nodes[e]["status"] == "complete")
+        findings.append(f"GATE_CONTEXT {nid} {done} completed experiments")
+    # Exits (KD9, KTD4): a complete run with an exit and no marker is pending, printed with its
+    # result beside the exit so the reader (and the model) can weigh them without opening the file;
+    # a crossed marker is reported as such; an overridden marker is a decline already made, so it
+    # prints nothing and is never re-raised. A run that has not finished has no exit to resolve.
+    for nid, rec in nodes.items():
+        if rec["kind"] != "experiment" or rec["status"] != "complete":
+            continue
+        if rec["exit_outcome"] == "crossed":
+            findings.append(f"EXIT_CROSSED {nid}")
+        elif rec["abandon_if"] and not rec["exit_outcome"]:
+            result = f'"{rec["result"]}"' if rec["result"] else "(no result)"
+            findings.append(f'EXIT_PENDING {nid} abandon_if="{rec["abandon_if"]}" result={result}')
+    # Deferred items and their triggers, evaluated by reopen_trigger() and nothing else, so "fired"
+    # here is the same "fired" the session-start report prints. A missing trigger, or a node-form
+    # trigger naming a node that does not exist, counts as a trigger needing judgment: a script can
+    # check neither, and a typo must never pin a graph at wait.
+    deferred = [(nid, rec) for nid, rec in nodes.items() if rec["status"] == "deferred"]
+    judgment, fired = 0, 0
+    for nid, rec in deferred:
+        trig = reopen_trigger(rec["reopen_when"])
+        findings.append(f"DEFERRED {nid} {rec['reopen_when'] or '(no trigger)'}")
+        if trig is None or trig[0] not in nodes:
+            judgment += 1
+        elif nodes[trig[0]]["status"] == trig[1]:
+            fired += 1
+            findings.append(f"FIRED {nid} {trig[0]} {trig[1]}")
+    # Futility (R3): declared only when something is deferred, nothing blocking is open, every
+    # trigger is node-form, and none has fired. An open idea or a planned or running experiment
+    # blocks it (there is still a next step); theories never enter the rule either way; a promoted
+    # or dropped idea and a complete or abandoned run block nothing. With a text or missing trigger
+    # the count of triggers needing judgment prints instead, and the verdict is the model's.
+    blocking = any((rec["kind"] == "idea" and rec["status"] == "open")
+                   or (rec["kind"] == "experiment" and rec["status"] in ("planned", "running"))
+                   for rec in nodes.values())
+    if deferred and not blocking:
+        if judgment:
+            findings.append(f"JUDGMENT {judgment} triggers need judgment")
+        elif not fired:
+            findings.append(f"FUTILITY {len(deferred)} deferred, all node-form, none fired")
+    print("PRECHECK:")
+    for ln in findings:
+        print(ln)
+    if all(ln.startswith("GATE_CONTEXT ") for ln in findings):
+        print("precheck: silent")
     print()
 
 # report

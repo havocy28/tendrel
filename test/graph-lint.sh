@@ -1607,5 +1607,482 @@ runlint "$d"
   && ok "exit_outcome: maybe -> lints clean (read as absent)" \
   || no "exit_outcome maybe clean" "rc=$RC out=$OUT"
 
+# --precheck (U2). The block prints before the report, `PRECHECK:` first, one finding per line with
+# a stable first token, a blank line, then the untouched report. `pre` isolates the block so the
+# assertions below read only it and never match a report line by accident.
+runpre(){ OUT="$(bash "$LINT" --precheck "$@" 2>&1)"; RC=$?; PRE="$(printf '%s\n' "$OUT" | sed -n '/^PRECHECK:$/,/^$/p')"; }
+has(){ printf '%s\n' "$PRE" | grep -qxF "$1"; }        # exact line present in the block
+lacks(){ ! printf '%s\n' "$PRE" | grep -q "$1"; }       # pattern absent from the block
+
+# 65. AE1: a theory whose next_gate names a complete node prints STALE_GATE with both IDs and the
+#     node's status; a gate naming a planned node prints nothing. GATE_CONTEXT counts the complete
+#     experiments carrying part_of or motivated_by edges to each non-shelved theory, context only.
+d="$(newfix)"
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: backtest
+next_gate: "EXP-001 beats vector-only by 5 pts nDCG -> paper_trade"
+---
+Hybrid beats vector-only.'
+node "$d" THEORY-002.md '---
+id: THEORY-002
+kind: theory
+status: idea
+next_gate: "EXP-002 recovers 80% of the precision lost to chunking"
+---
+Reranking recovers chunking loss.'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "Does hybrid beat vector-only?"
+result: "+6 pts nDCG@10"
+compared_to: "vector-only"
+edges:
+  - {rel: part_of, to: THEORY-001}
+---
+Done. The gate it was run for still names it.'
+node "$d" EXP-002.md '---
+id: EXP-002
+kind: experiment
+status: planned
+question: "Does the reranker recover chunking loss?"
+edges:
+  - {rel: motivated_by, to: THEORY-002}
+---
+Not run yet.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "STALE_GATE THEORY-001 EXP-001 complete" \
+  && has "GATE_CONTEXT THEORY-001 1 completed experiments" && has "GATE_CONTEXT THEORY-002 0 completed experiments" \
+  && lacks "STALE_GATE THEORY-002" && lacks "precheck: silent"; } \
+  && ok "precheck: gate naming a complete node -> STALE_GATE with theory, node, status; planned node -> nothing" \
+  || no "precheck STALE_GATE" "rc=$RC out=$OUT"
+[ "$(printf '%s\n' "$PRE" | grep -c '^FUTILITY\|^JUDGMENT')" -eq 0 ] \
+  && ok "precheck: no deferred items -> no FUTILITY and no JUDGMENT" \
+  || no "precheck no deferred items" "pre=$PRE"
+
+# 66. R16, the known false-positive shape: a gate that cites a completed node only as a BASELINE to
+#     beat still prints STALE_GATE, because the rule is a substring match of node IDs against
+#     terminal statuses (KTD3) and reads no meaning. Recorded here and in the changelog, not hidden:
+#     the brief is expected to read the gate text and say so, and the rule never judges.
+d="$(newfix)"
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: backtest
+next_gate: "beat EXP-001 (the baseline) by 2 pts nDCG on the same 200 queries"
+---
+The baseline is complete; the gate is not.'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "What does vector-only score?"
+result: "0.41 nDCG@10"
+---
+The baseline run.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "STALE_GATE THEORY-001 EXP-001 complete"; } \
+  && ok "precheck: gate citing a completed node as a baseline -> STALE_GATE (known false positive, R16)" \
+  || no "precheck baseline false positive" "rc=$RC out=$OUT"
+
+# 67. A shelved theory's gate is never checked and gets no context line; an abandoned experiment
+#     attached to a theory does not make the gate stale unless the gate names it (R16); a gate that
+#     does name an abandoned node, or a validated pipeline node, prints STALE_GATE with that status.
+d="$(newfix)"
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: shelved
+next_gate: "EXP-001 beats vector-only"
+---
+Shelved: its gate is nobody'"'"'s next step.'
+node "$d" THEORY-002.md '---
+id: THEORY-002
+kind: theory
+status: backtest
+next_gate: "EXP-002 lands a bounded null"
+---
+Live theory; EXP-003 was abandoned under it.'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "q?"
+edges:
+  - {rel: part_of, to: THEORY-001}
+---
+Complete, named only by the shelved gate.'
+node "$d" EXP-002.md '---
+id: EXP-002
+kind: experiment
+status: planned
+question: "q?"
+edges:
+  - {rel: part_of, to: THEORY-002}
+---
+Planned.'
+node "$d" EXP-003.md '---
+id: EXP-003
+kind: experiment
+status: abandoned
+question: "q?"
+edges:
+  - {rel: part_of, to: THEORY-002}
+---
+Abandoned, attached to THEORY-002, not named by its gate.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && lacks "STALE_GATE" && lacks "GATE_CONTEXT THEORY-001" \
+  && has "GATE_CONTEXT THEORY-002 0 completed experiments" && has "precheck: silent"; } \
+  && ok "precheck: shelved theory's gate never checked; attached abandoned node does not stale a gate that does not name it" \
+  || no "precheck shelved and abandoned-attached" "rc=$RC out=$OUT"
+node "$d" THEORY-002.md '---
+id: THEORY-002
+kind: theory
+status: backtest
+next_gate: "rerun EXP-003 once NODE-001 is validated"
+---
+Now the gate names the abandoned run and a validated node.'
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: validated
+---
+Validated.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "STALE_GATE THEORY-002 EXP-003 abandoned" && has "STALE_GATE THEORY-002 NODE-001 validated" \
+  && lacks "STALE_GATE THEORY-001"; } \
+  && ok "precheck: gate naming an abandoned node and a validated node -> STALE_GATE for each, with its status" \
+  || no "precheck abandoned and validated named" "rc=$RC out=$OUT"
+
+# 68. Exits. A complete experiment with abandon_if and no exit_outcome prints EXIT_PENDING with the
+#     exit and the result side by side, `(no result)` when there is none; exit_outcome: crossed
+#     prints EXIT_CROSSED and no EXIT_PENDING; overridden prints neither (AE7a). The pre-check
+#     enumerates and never judges whether the result crossed the exit (KD10).
+d="$(newfix)"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "q?"
+abandon_if: "gain under 2 pts at n=200"
+result: "+1 pt, inside the bound"
+---
+Ran to completion; nobody has read the result against the exit yet.'
+node "$d" EXP-002.md '---
+id: EXP-002
+kind: experiment
+status: complete
+question: "q?"
+abandon_if: "no signal by epoch 10"
+---
+Complete with an exit and no recorded result.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has 'EXIT_PENDING EXP-001 abandon_if="gain under 2 pts at n=200" result="+1 pt, inside the bound"' \
+  && has 'EXIT_PENDING EXP-002 abandon_if="no signal by epoch 10" result=(no result)' && lacks "EXIT_CROSSED"; } \
+  && ok "precheck: complete + abandon_if + no exit_outcome -> EXIT_PENDING with exit and result side by side" \
+  || no "precheck EXIT_PENDING" "rc=$RC out=$OUT"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "q?"
+abandon_if: "gain under 2 pts at n=200"
+result: "+1 pt, inside the bound"
+exit_outcome: crossed
+---
+The user recorded the crossing.'
+node "$d" EXP-002.md '---
+id: EXP-002
+kind: experiment
+status: complete
+question: "q?"
+abandon_if: "no signal by epoch 10"
+result: "signal at epoch 12"
+exit_outcome: overridden
+---
+The user declined the exit; it is never re-raised.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "EXIT_CROSSED EXP-001" && lacks "EXIT_PENDING" && lacks "EXP-002"; } \
+  && ok "precheck: crossed -> EXIT_CROSSED only; overridden -> neither line (AE7a)" \
+  || no "precheck EXIT_CROSSED / overridden" "rc=$RC out=$OUT"
+node "$d" EXP-003.md '---
+id: EXP-003
+kind: experiment
+status: running
+question: "q?"
+abandon_if: "no signal by epoch 10"
+---
+Still running: an exit on a run that has not finished is not pending.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && lacks "EXP-003"; } \
+  && ok "precheck: a running experiment with an abandon_if prints no exit line" \
+  || no "precheck running exit silent" "rc=$RC out=$OUT"
+
+# 69. AE2: every deferred item carries a node-form trigger that has not fired and nothing blocking is
+#     open, so FUTILITY prints with the count. A theory at backtest is present and neither blocks nor
+#     enables it: theories never enter the futility rule.
+d="$(newfix)"
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: backtest
+next_gate: "a bounded null on the reranker line"
+---
+Live theory.'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: running
+question: "q?"
+---
+The run everything waits on.'
+node "$d" IDEA-001.md '---
+id: IDEA-001
+kind: idea
+status: deferred
+reopen_when: "EXP-001 complete"
+---
+Parked behind the run.'
+node "$d" EXP-002.md '---
+id: EXP-002
+kind: experiment
+status: deferred
+question: "q?"
+reopen_when: "EXP-001 abandoned"
+---
+Parked behind the same run, the other way.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && lacks "FUTILITY" && lacks "JUDGMENT" && has "DEFERRED IDEA-001 EXP-001 complete"; } \
+  && ok "precheck: a running experiment blocks FUTILITY (and JUDGMENT), deferred lines still print" \
+  || no "precheck running blocks futility" "rc=$RC out=$OUT"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: planned
+question: "q?"
+---
+Planned, not yet run.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && lacks "FUTILITY" && lacks "JUDGMENT"; } \
+  && ok "precheck: a planned experiment blocks FUTILITY" || no "precheck planned blocks futility" "rc=$RC out=$OUT"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: abandoned
+question: "q?"
+---
+Stopped early; the deferred items now wait on statuses it will never reach again or already has.'
+node "$d" EXP-002.md '---
+id: EXP-002
+kind: experiment
+status: deferred
+question: "q?"
+reopen_when: "EXP-001 running"
+---
+Parked behind a status the run does not hold.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "DEFERRED IDEA-001 EXP-001 complete" && has "DEFERRED EXP-002 EXP-001 running" \
+  && has "FUTILITY 2 deferred, all node-form, none fired" && lacks "JUDGMENT" && lacks "FIRED" && lacks "precheck: silent"; } \
+  && ok "precheck: all deferred items node-form and unfired, nothing blocking open -> FUTILITY (AE2)" \
+  || no "precheck FUTILITY" "rc=$RC out=$OUT"
+node "$d" IDEA-002.md '---
+id: IDEA-002
+kind: idea
+status: open
+---
+One open idea: the honest answer is still "keep going".'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && lacks "FUTILITY" && lacks "JUDGMENT"; } \
+  && ok "precheck: one open idea blocks FUTILITY" || no "precheck open idea blocks futility" "rc=$RC out=$OUT"
+node "$d" IDEA-002.md '---
+id: IDEA-002
+kind: idea
+status: promoted
+---
+Promoted ideas are already experiments elsewhere; they block nothing.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "FUTILITY 2 deferred, all node-form, none fired"; } \
+  && ok "precheck: a promoted idea does not block FUTILITY" || no "precheck promoted idea" "rc=$RC out=$OUT"
+
+# 70. AE2a and decision (b): one text-form trigger, or one deferred item with no trigger at all,
+#     turns FUTILITY into JUDGMENT with the count of triggers needing judgment; the missing trigger
+#     prints as `(no trigger)`.
+node "$d" IDEA-002.md '---
+id: IDEA-002
+kind: idea
+status: deferred
+reopen_when: "when the case count passes 500"
+---
+A sentence for a person to judge.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "DEFERRED IDEA-002 when the case count passes 500" \
+  && has "JUDGMENT 1 triggers need judgment" && lacks "FUTILITY"; } \
+  && ok "precheck: one text trigger -> JUDGMENT count, no FUTILITY (AE2a)" || no "precheck JUDGMENT text" "rc=$RC out=$OUT"
+node "$d" IDEA-003.md '---
+id: IDEA-003
+kind: idea
+status: deferred
+---
+Deferred with nothing that would reopen it.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "DEFERRED IDEA-003 (no trigger)" && has "JUDGMENT 2 triggers need judgment" && lacks "FUTILITY"; } \
+  && ok "precheck: a deferred item with no reopen_when -> (no trigger), counted as judgment, never FUTILITY" \
+  || no "precheck no trigger" "rc=$RC out=$OUT"
+rm -f "$d/graph/IDEA-002.md"
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "JUDGMENT 1 triggers need judgment" && lacks "FUTILITY"; } \
+  && ok "precheck: the missing trigger alone still prints JUDGMENT and no FUTILITY" \
+  || no "precheck no trigger alone" "rc=$RC out=$OUT"
+
+# 71. FIRED: a node-form trigger whose node has reached the named status prints FIRED beside its
+#     DEFERRED line, and neither FUTILITY nor JUDGMENT (one fired, so not futile; all node-form, so
+#     nothing to judge). The wrong status prints DEFERRED only. A missing node prints DEFERRED and
+#     the U1 warning in the report; it is node-form and unfired, so the literal rule still says
+#     FUTILITY, with the warning beside it naming the typo.
+d="$(newfix)"
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "q?"
+---
+Done.'
+node "$d" IDEA-001.md '---
+id: IDEA-001
+kind: idea
+status: deferred
+reopen_when: "EXP-001 complete"
+---
+Waiting on the run, which has finished.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "DEFERRED IDEA-001 EXP-001 complete" && has "FIRED IDEA-001 EXP-001 complete" \
+  && lacks "FUTILITY" && lacks "JUDGMENT"; } \
+  && ok "precheck: node-form trigger whose node reached the status -> FIRED, no FUTILITY, no JUDGMENT" \
+  || no "precheck FIRED" "rc=$RC out=$OUT"
+node "$d" IDEA-001.md '---
+id: IDEA-001
+kind: idea
+status: deferred
+reopen_when: "EXP-001 abandoned"
+---
+Waiting on a status the run does not hold.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "DEFERRED IDEA-001 EXP-001 abandoned" && lacks "FIRED" \
+  && has "FUTILITY 1 deferred, all node-form, none fired"; } \
+  && ok "precheck: trigger with the wrong status -> DEFERRED only, never FIRED" || no "precheck wrong status" "rc=$RC out=$OUT"
+node "$d" IDEA-001.md '---
+id: IDEA-001
+kind: idea
+status: deferred
+reopen_when: "EXP-999 complete"
+---
+Waiting on a run that is not in the graph.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "DEFERRED IDEA-001 EXP-999 complete" && lacks "FIRED" \
+  && has "JUDGMENT 1 triggers need judgment" && lacks "FUTILITY" \
+  && echo "$OUT" | grep -q "W IDEA-001: reopen_when names missing node EXP-999"; } \
+  && ok "precheck: trigger naming a missing node -> DEFERRED plus the U1 warning, JUDGMENT not FUTILITY, never FIRED" \
+  || no "precheck missing node" "rc=$RC out=$OUT"
+
+# 72. Clean graph: `PRECHECK:`, `precheck: silent`, a blank line, then the report byte-identical to
+#     the run without the flag, exit code unchanged (0 clean, 1 erroring). A graph whose only lines
+#     would be GATE_CONTEXT is still silent: context is not a finding.
+plain="$(bash "$LINT" "$ae4" 2>&1)"; prc=$?
+runpre "$ae4"
+rest="$(printf '%s\n' "$OUT" | sed '1,/^$/d')"
+{ [ "$prc" -eq 0 ] && [ "$RC" -eq 0 ] && [ "$rest" = "$plain" ] \
+  && [ "$(printf '%s\n' "$OUT" | sed -n '1p')" = "PRECHECK:" ] && [ "$(printf '%s\n' "$OUT" | sed -n '2p')" = "precheck: silent" ] \
+  && [ -z "$(printf '%s\n' "$OUT" | sed -n '3p')" ]; } \
+  && ok "precheck: clean graph -> PRECHECK:, precheck: silent, blank line, report unchanged, exit 0" \
+  || no "precheck clean graph" "prc=$prc rc=$RC plain=$plain out=$OUT"
+d="$(newfix)"
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: backtest
+next_gate: "a bounded null on the reranker line"
+---
+Live theory, nothing stale.'
+node "$d" NODE-001.md '---
+id: NODE-001
+kind: pipeline_node
+status: untested
+edges:
+  - {rel: depends_on, to: NODE-999}
+---
+Dangling on purpose.'
+plain="$(bash "$LINT" "$d" 2>&1)"; prc=$?
+runpre "$d"
+rest="$(printf '%s\n' "$OUT" | sed '1,/^$/d')"
+{ [ "$prc" -eq 1 ] && [ "$RC" -eq 1 ] && [ "$rest" = "$plain" ] \
+  && has "GATE_CONTEXT THEORY-001 0 completed experiments" && has "precheck: silent"; } \
+  && ok "precheck: erroring graph with only a context line -> still silent, exit 1, report unchanged" \
+  || no "precheck context-only erroring graph" "prc=$prc rc=$RC plain=$plain out=$OUT"
+
+# 73. Flag grammar: `--explain` and `--precheck` are a leading flag block in either order; a flag
+#     after a positional is a usage error, exit 2, no report. With both flags both blocks print and
+#     the report after them is unchanged. The --explain fixtures above (cases 46 to 59) stay green.
+OUT="$(bash "$LINT" "$ae4" --precheck 2>&1)"; RC=$?
+{ [ "$RC" -eq 2 ] && echo "$OUT" | grep -qi "usage" && echo "$OUT" | grep -qF -- "[--explain] [--precheck]" \
+  && ! echo "$OUT" | grep -q "node(s) in"; } \
+  && ok "--precheck after the root -> usage error, exit 2, no report" || no "--precheck not first" "rc=$RC out=$OUT"
+OUT="$(bash "$LINT" --explain "$ae4" --precheck 2>&1)"; RC=$?
+{ [ "$RC" -eq 2 ] && echo "$OUT" | grep -qi "usage" && ! echo "$OUT" | grep -q "node(s) in"; } \
+  && ok "--precheck after --explain and the root -> usage error, exit 2" || no "--precheck after positional" "rc=$RC out=$OUT"
+plain="$(bash "$LINT" "$ae4" 2>&1)"
+a="$(bash "$LINT" --explain --precheck "$ae4" 2>&1)"; arc=$?
+b="$(bash "$LINT" --precheck --explain "$ae4" 2>&1)"; brc=$?
+both(){   # both OUTPUT: the EXPLAIN block, the PRECHECK block, then the plain report, whatever the order
+  printf '%s\n' "$1" | grep -q '^EXPLAIN (2 edges):$' && printf '%s\n' "$1" | grep -q '^PRECHECK:$' \
+    && printf '%s\n' "$1" | grep -qx 'precheck: silent' \
+    && [ "$(printf '%s\n' "$1" | sed '1,/^$/d' | sed '1,/^$/d')" = "$plain" ]
+}
+{ [ "$arc" -eq 0 ] && [ "$brc" -eq 0 ] && both "$a" && both "$b"; } \
+  && ok "--explain --precheck and --precheck --explain both print both blocks, report unchanged" \
+  || no "both flags both orders" "arc=$arc a=$a brc=$brc b=$b"
+c="$(cd "$ae4" && bash "$LINT" --precheck --explain NODE-008 2>&1)"; crc=$?
+{ [ "$crc" -eq 0 ] && echo "$c" | grep -q '^EXPLAIN (1 edges):$' && echo "$c" | grep -q '^PRECHECK:$'; } \
+  && ok "--precheck --explain NODE-008 from inside the repo: the ID still scopes --explain" \
+  || no "both flags with an ID" "crc=$crc c=$c"
+
+# 74. Reads only committed frontmatter and edges (KD10): a fixture built as a git repo, committed,
+#     and cloned to a scratch directory gives a byte-identical PRECHECK block at the same commit.
+base="$(mktemp -d)"; d="$base/src"; mkdir -p "$d/graph"
+node "$d" THEORY-001.md '---
+id: THEORY-001
+kind: theory
+status: backtest
+next_gate: "EXP-001 beats vector-only -> paper_trade"
+---
+Theory.'
+node "$d" EXP-001.md '---
+id: EXP-001
+kind: experiment
+status: complete
+question: "q?"
+result: "+6 pts"
+abandon_if: "gain under 2 pts"
+edges:
+  - {rel: part_of, to: THEORY-001}
+---
+Complete.'
+node "$d" IDEA-001.md '---
+id: IDEA-001
+kind: idea
+status: deferred
+reopen_when: "EXP-001 abandoned"
+---
+Parked.'
+( cd "$d" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm fixture ) >/dev/null 2>&1
+git clone -q "$d" "$base/clone" >/dev/null 2>&1
+src="$(cd "$d" && bash "$LINT" --precheck . 2>&1 | sed -n '/^PRECHECK:$/,/^$/p')"
+cln="$(cd "$base/clone" && bash "$LINT" --precheck . 2>&1 | sed -n '/^PRECHECK:$/,/^$/p')"
+{ [ -n "$src" ] && [ "$src" = "$cln" ] && printf '%s\n' "$src" | grep -qx "STALE_GATE THEORY-001 EXP-001 complete" \
+  && printf '%s\n' "$src" | grep -q '^EXIT_PENDING EXP-001' && printf '%s\n' "$src" | grep -q '^FUTILITY 1 deferred'; } \
+  && ok "precheck: a scratch clone at the same commit prints a byte-identical PRECHECK block" \
+  || no "precheck clone parity" "src=$src cln=$cln"
+
 echo "---"; echo "graph-lint test: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]
