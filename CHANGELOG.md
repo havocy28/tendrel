@@ -66,7 +66,8 @@ default branch, so the latest tagged version is what installs pull on `/plugin m
 - Additive in every surface; no existing graph gains a new error. Newly failing patterns: none.
   New warnings, never errors: a planned experiment with a `config` and no `abandon_if`; a complete
   experiment carrying `validates` with no `compared_to`; a node-form `reopen_when` naming a node
-  that does not exist. The doc-search example (`examples/doc-search`) gained a `compared_to` line
+  that does not exist, or a status that node's kind cannot hold (such a trigger can never fire, so
+  the pre-check counts it as a judgment call, never as futility). The doc-search example (`examples/doc-search`) gained a `compared_to` line
   on `EXP-002` to stay at zero warnings under the new check. On the maintainer's 131-node graph the
   warning count rose from 31 to 43, all `compared_to` warnings, with no new errors. The legacy
   byte-identical lint output pin and the backwards-compat sweep (including the new `stop-bundle`
