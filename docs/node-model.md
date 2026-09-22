@@ -30,15 +30,23 @@ across lines. Flat frontmatter is what lets the report/status scripts parse it r
 
 | Kind | ID prefix | What it is | `status` vocabulary |
 |---|---|---|---|
-| `experiment` | `EXP-` | A concrete thing you ran, with a question and a result | planned · running · complete · abandoned |
+| `experiment` | `EXP-` | A concrete thing you ran, with a question and a result | planned · running · complete · abandoned · deferred |
 | `theory` | `THEORY-` | A hypothesis container with a lifecycle | idea · backtest · paper_trade · live_small · live_full · shelved |
 | `pipeline_node` | `NODE-` | A system component whose correctness is open | untested · assumed_working · validated · invalidated · blocked |
 | `decision` | `DEC-` | A methodological choice, with its evidence | active · under_review · reversed |
-| `idea` | `IDEA-` | Something to maybe try later | open · promoted · dropped |
+| `idea` | `IDEA-` | Something to maybe try later | open · promoted · dropped · deferred |
 | `observation` | `OBS-` | A pattern/anomaly noticed; no lifecycle | (none) |
 
 Per-kind attributes (expected, not enforced): `experiment` needs `question`, `config`; `theory`
-needs `confidence` (low/moderate/high), `next_gate`; `pipeline_node` takes an optional `eval`.
+needs `confidence` (low/moderate/high), `next_gate`; `pipeline_node` takes an optional `eval`. An
+`experiment` also accepts four optional flat fields. `abandon_if` is the pre-registered number or
+outcome that ends the line, written before the run. `compared_to` is the null or comparison group
+the result is measured against. `bound` is the effect size a null result excludes; a null without
+one is uninformative. `exit_outcome` records how `abandon_if` was resolved: `crossed` or
+`overridden`, each with the value or the reason in the body. An `idea` or `experiment` with
+`status: deferred` also accepts `reopen_when`: the node form is exactly `<NODE-ID> <status>` and
+is evaluated by the scripts, and any other value is a text trigger, listed and never evaluated. A
+node without any of these fields behaves exactly as it did before.
 
 **IDs** are human-readable, zero-padded, per-(project, kind): `EXP-001`, `THEORY-001`. Reference
 them by ID in conversation ("blocked on `NODE-003`") so the graph stays legible.

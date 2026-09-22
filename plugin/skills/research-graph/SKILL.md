@@ -91,15 +91,28 @@ lines.
 
 | Kind | ID prefix | What it is | `status` vocabulary |
 |---|---|---|---|
-| `experiment` | `EXP-` | A concrete thing you ran, with a question and a result | `planned` · `running` · `complete` · `abandoned` |
+| `experiment` | `EXP-` | A concrete thing you ran, with a question and a result | `planned` · `running` · `complete` · `abandoned` · `deferred` |
 | `theory` | `THEORY-` | A hypothesis container with a lifecycle | `idea` · `backtest` · `paper_trade` · `live_small` · `live_full` · `shelved` |
 | `pipeline_node` | `NODE-` | A system component whose correctness is open | `untested` · `assumed_working` · `validated` · `invalidated` · `blocked` |
 | `decision` | `DEC-` | A methodological choice, with its evidence | `active` · `under_review` · `reversed` |
-| `idea` | `IDEA-` | Something to maybe try later | `open` · `promoted` · `dropped` |
+| `idea` | `IDEA-` | Something to maybe try later | `open` · `promoted` · `dropped` · `deferred` |
 | `observation` | `OBS-` | A pattern/anomaly noticed; no lifecycle | (none) |
+
+`deferred` is a choice, not a consequence: the item is worth keeping but not worth running yet
+(`blocked` is what a failed dependency does to a pipeline node). It applies to ideas and
+experiments only.
 
 Per-kind attributes (expected, not enforced): `experiment` → `question`, `config`;
 `theory` → `confidence` (low/moderate/high), `next_gate`; `pipeline_node` → optional `eval`.
+An `experiment` also accepts four optional flat fields. `abandon_if` is the pre-registered number
+or outcome that ends the line, written before the run. `compared_to` is the null or comparison
+group the result is measured against. `bound` is the effect size a null result excludes; a null
+without one is uninformative. `exit_outcome` records how an `abandon_if` was resolved: `crossed`
+or `overridden`, each with the value or the reason in the body. An `idea` or `experiment` with
+`status: deferred` also accepts `reopen_when`: the node form is exactly `<NODE-ID> <status>` and is
+evaluated by the scripts; any other value is a text trigger, listed and never evaluated. Unknown
+or absent values behave as before: a node without these fields reads exactly as it did, and an
+`exit_outcome` outside the two values reads as absent.
 
 `provenance` (any kind, expected, not enforced): a flat list of repo-relative paths naming the
 artifacts the node's numbers come from, e.g. `provenance: [results/exp-012-ner.md]`. Write the
@@ -140,8 +153,12 @@ a node by its ID, never by its file path; a `graph/<ID>.md` target is an error n
 ## What logging looks like (best-effort, in-session)
 
 - **Starting an experiment** → create `graph/EXP-<n>.md` (frontmatter: kind, question,
-  config), status `running`. On finish → set `result` and status `complete`/`abandoned`,
-  add edges: `part_of` the relevant theory, `validates`/`invalidated_by` any decision.
+  config), status `running`. When the experiment comes from a `next` proposal,
+  carry the proposal's losing outcome into `abandon_if` when you create the node; when it has a
+  null or comparison group, write `compared_to`. An exit written at creation is a
+  pre-registration; one written after the result is a rationalization. On finish → set `result`
+  and status `complete`/`abandoned`, add edges: `part_of` the relevant theory,
+  `validates`/`invalidated_by` any decision.
 - **Recording a number** (a `result`, a metric, a count in the body) → read the number out of
   the artifact that produced it (the results file, table, or log on disk) rather than restating
   it from conversation or memory, and name that artifact in `provenance:`. Transcription is where
@@ -190,11 +207,29 @@ When `reconcile = auto`, the user has chosen unattended reconcile writes for thi
   not merely describe the mismatch or save it for a later offer. If you are mid-task when you
   notice, finish the user's task first, then fold the drift in at the end of that same turn.
   Under `auto`, "getting up to speed" includes bringing the graph up to speed.
-- After each auto reconcile, run the lint (`bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh"`;
-  if that variable is unset, locate the plugin's `scripts/graph-lint.sh`) and include the result
-  in the summary. Unattended
+- After each auto reconcile, run the lint (`bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh"
+  --precheck .`; if that variable is unset, locate the plugin's `scripts/graph-lint.sh`) and
+  include the result in the summary. Unattended
   writes get the deterministic check; if the lint reports errors, surface them and offer repair per
-  the Graph lint section (repairs stay approval-gated even under `auto`).
+  the Graph lint section (repairs stay approval-gated even under `auto`). Read the `PRECHECK:`
+  block after the sweep; each `EXIT_PENDING` and `FIRED` line is a proposal per the Graph lint
+  section, whether or not this sweep caused it.
+- An exit stays approval-gated even under `auto`. When you record a result for an experiment
+  carrying `abandon_if` and no `exit_outcome`, compare the result to the exit as a judgment (the
+  result is free text; nothing deterministic decides this). When it crossed, propose writing
+  `exit_outcome: crossed`, with the crossed value in the body, as a separate yes or no at the end
+  of the turn: never bundled into a batch approval, and never applied under any `reconcile`
+  value. A narrated result is never a yes: when the user reports the number and even says it fell
+  below the line, that is the result being logged, not an answer to a proposal you have not made
+  yet, so write the marker only after they answer the yes or no. The experiment stays `complete`
+  with its real result either way. A decline writes `exit_outcome: overridden` with the reason in
+  the body, so the exit is never re-raised. Ending the line (dropping the idea, shelving the
+  theory) is a further, separate proposal.
+- Reopening stays approval-gated even under `auto`. A fired trigger (the pre-check's `FIRED` line,
+  or the session-start report's "Deferred, trigger fired" line) is proposed, never applied, under
+  every `reconcile` value: propose moving the item back to `open` or `planned`, and leave it
+  `deferred` until the user says so. A trigger the user declines stays listed as fired until the
+  item's status or trigger changes.
 - Explicit triggers (`/tendrel:reconcile`, "reconcile the graph") behave identically under both
   values.
 
@@ -209,6 +244,15 @@ When reconciling:
    precise figure in its body, copy it from the cited artifact and declare that artifact in
    `provenance:` (see the logging section); never restate a number from conversation when the
    file that produced it is on disk.
+   A deferral is a status and a trigger, never a body note. When an idea or a planned experiment
+   is parked (not worth running at the current sample size, gated on something outside the graph),
+   set `status: deferred` and write `reopen_when`. The node form `<NODE-ID> <status>` (for example
+   `reopen_when: EXP-003 complete`) is what the scripts evaluate; anything else is a text trigger,
+   listed by the pre-check and `status.md` but never evaluated by a script. A blocker written only
+   in prose is invisible to every surface that reads triggers.
+   When you transition a node's status, look for `reopen_when` lines naming that ID and
+   propose reopening each match in the same turn, as the reopen bullet above describes; the
+   proposal is the sweep's, the decision is the user's.
    After writing or changing edges, and before ending the sweep, run
    `bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh" --explain . <touched node IDs>` (if the
    variable is unset, locate the plugin's `scripts/graph-lint.sh`) and review each rendered line:
@@ -264,9 +308,15 @@ repo-relative paths (a tracked path resolves silently, an untracked present path
 matched by the repo `.gitignore` is silent, a missing path errors). The consistency rule cascades:
 because a blocked dependency also triggers it, invalidation must propagate all the way down a
 chain, not just one hop. It exits non-zero on errors; warnings (like an empty body) do not fail.
+It also warns, never errors, on a planned experiment that has a `config` and no `abandon_if`, on a
+complete experiment carrying a `validates` edge with no `compared_to`, and on a node-form
+`reopen_when` naming a node that does not exist or a status that node's kind cannot hold.
 `--explain` is available on demand ("explain the edges", "what does each edge point at?") and
 renders every edge, or only those of the node IDs you name, with its target's first line, so an
-edge that resolves cleanly but says the wrong thing is visible to a reader.
+edge that resolves cleanly but says the wrong thing is visible to a reader. `--precheck` prints
+the `PRECHECK:` block the `next` brief quotes (stale gates, pending and crossed exits, deferred
+items, fired triggers, futility, or `precheck: silent`) ahead of the unchanged report; both flags
+come before the repo path, and neither changes the exit code.
 
 When the lint reports **error**-severity violations, summarize them and **offer** to fix them; do
 not auto-fix. On the user's approval, repair through the normal reconcile behavior:
@@ -287,6 +337,15 @@ not auto-fix. On the user's approval, repair through the normal reconcile behavi
 - self-loop: remove the edge; a node cannot invalidate, supersede, or belong to itself.
 - missing path target (an edge `to:` a repo-relative path that is not on disk): ask the user which
   artifact was meant and re-point it, or remove it if they confirm; do not guess a path.
+
+The pre-check's lines are findings to raise, not errors to repair, and each is a proposal:
+
+- fired trigger (`FIRED`): propose reopening the deferred item, per the reconcile section.
+- pending exit (`EXIT_PENDING`): propose the comparison at reconcile, where the result is weighed
+  against the exit and `exit_outcome` is offered as its own yes or no.
+- stale gate (`STALE_GATE`): read the gate text; when the named node's finish actually met the
+  gate, propose a gate rewrite (or the stage transition it earns). Approval-gated, and never
+  applied by `next`; a gate that cites a finished run only as a baseline is not stale.
 
 After you apply an approved repair, **re-run `graph-lint.sh`** and report the result. Repair is
 model-driven and its quality is not deterministic, so the deterministic check is what confirms the
@@ -310,8 +369,9 @@ in the summary.
 
 On request, generate `status.md` from `graph/`: theories grouped by lifecycle stage with
 confidence and next gate; pipeline nodes grouped by evidence status; reversed decisions with
-reasons; open ideas. One screen. Regenerate it; do not maintain it by hand (a maintained
-summary drifts).
+reasons; open ideas; a section headed "Deferred, reopen when" listing each `deferred` idea or
+experiment with its `reopen_when` trigger (or "no trigger"), omitted when nothing is deferred.
+One screen. Regenerate it; do not maintain it by hand (a maintained summary drifts).
 
 ### The graph visualization (a mermaid diagram of the actual nodes)
 
@@ -324,8 +384,11 @@ interface to the graph itself. Build it by reading the same frontmatter the text
   - `theory` → rounded (stadium) node, append its lifecycle stage (e.g. `(backtest)`).
   - `experiment` / `decision` / `idea` / `observation` → default nodes; keep them present but
     visually quieter than theories and pipeline nodes.
-  - Apply mermaid `classDef` + `class` for the invalidated/blocked/validated styles so the
-    states read at a glance; keep the palette to a few classes, not per-node styling.
+  - `deferred` (idea or experiment) → muted grey, dashed border, distinct from blocked's orange
+    dashed and invalidated's red: `classDef deferred fill:#f0f0f0,stroke:#999,stroke-dasharray:
+    4 4,color:#666` and one `class <IDs> deferred` line naming every deferred node.
+  - Apply mermaid `classDef` + `class` for the invalidated/blocked/validated/deferred styles so
+    the states read at a glance; keep the palette to a few classes, not per-node styling.
 - **One edge per graph edge**, arrow from source → target, labeled with the relation
   (`depends_on`, `validates`, `invalidated_by`, `supersedes`, `part_of`, `motivated_by`,
   `spawned`). A `depends_on` target that has no node file is a dangling edge — render it to a
@@ -372,12 +435,20 @@ the summary.
 next?") turns the whole graph into a forward plan. Where `status.md` is a snapshot of state, this is
 a synthesis of *history into next steps*. It is read-only: it proposes, it never writes `graph/`.
 
-1. **Lint first.** Run `graph-lint.sh` (`bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh"` with the
-   repo root as its argument; if that variable is unset, locate the plugin's `scripts/graph-lint.sh`).
+1. **Lint first, with the pre-check.** Run
+   `bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh" --precheck .` from the repo root (if that
+   variable is unset, locate the plugin's `scripts/graph-lint.sh`; the flag comes first, the repo
+   root after it). The `PRECHECK:` block prints before the lint report: one line per stale gate
+   (`STALE_GATE`), pending or crossed exit (`EXIT_PENDING`, `EXIT_CROSSED`), deferred item
+   (`DEFERRED`), fired reopen trigger (`FIRED`), and either `FUTILITY`, `JUDGMENT`, or a literal
+   `precheck: silent`; `GATE_CONTEXT` lines are context, never findings. It enumerates and never
+   judges: whether a gate that names a finished node has actually been met, or a result crossed
+   its exit, is your call from the quoted lines, made in plain language above the footer.
    On error-severity violations, summarize them and offer repair per the Graph lint section before
    trusting a plan; do not silently plan on a graph that fails integrity. If the user asks to proceed
    anyway, plan with a prominent caveat naming the integrity problems that may skew the analysis.
-   Warnings do not block planning.
+   This pre-empts the verdict the way it pre-empts planning; the pre-check block still prints and
+   is still quoted in the footer. Warnings do not block planning.
 2. **Read the whole graph**, not just the anomaly summary. Reconstruct the investigation arc.
 3. **Produce a brief, then proposals**, in this order:
    - **Brief:** what is validated and what it rests on; what was invalidated and what that ruled
@@ -386,7 +457,43 @@ a synthesis of *history into next steps*. It is read-only: it proposes, it never
    - **Proposals:** 2-3 concrete next experiments. Each names *why now* and *what to skip and why*.
      The negative grounding ("skip X, you already ruled it out in ...") is required, not optional:
      it is the half of the advice a fresh model cannot give and the reader would otherwise waste
-     weeks rediscovering.
+     weeks rediscovering. Each proposal also states the losing outcome that would end its line (a
+     number or a result agreed before the run), so the exit exists before the experiment does.
+4. **The verdict.** The brief ends in exactly one of three verdicts, on exactly one body line that
+   reads `Verdict: continue`, `Verdict: conclude`, or `Verdict: wait`. Markdown emphasis or a
+   heading around it is fine (`**Verdict:** continue`, `## Verdict: continue`); the detectors strip
+   leading markup. Never emit two such lines. What follows depends on the verdict:
+   - **continue:** the 2-3 proposals from step 3, each with its losing outcome.
+   - **conclude:** what stands, what it rests on, and what would reopen the line. No proposals.
+   - **wait:** what unlocks the work, listing every trigger. No proposals.
+
+   Choose it in this order. If the pre-check printed `FUTILITY`, the verdict is `wait` with no
+   judgment: everything open is deferred behind a node-form trigger that has not fired, and the
+   wait section lists every trigger. If nothing at all is open or deferred (no open idea, no
+   planned or running experiment, no deferred item), the verdict is `conclude` or `continue`,
+   never `wait`. Otherwise judge, under a burden of proof: a `continue` rests on at least one
+   non-terminal node whose next result would change what the graph says (a planned or running
+   experiment, an open idea, or a theory with an unmet gate); complete, abandoned, invalidated,
+   dropped, and shelved nodes cannot discriminate and do not count. A `conclude` or `wait` rests
+   on the nodes whose evidence settles the line or whose triggers gate it; cite those settling
+   nodes, not the ones you are declining to run. A `JUDGMENT` line means a deferred trigger is
+   text, missing (listed as `(no trigger)`), or can never fire as written (it names a node that
+   does not exist, or a status that node's kind cannot hold); read it yourself and say what you
+   decided.
+
+   Two evidence rules: a null result with no `bound` in its frontmatter is uninformative, so never
+   cite it to conclude a line or to refute anything (it excludes no effect size); a `validates`
+   edge from an experiment with no `compared_to` is provisional support, and the brief says so.
+   Take the second list from the lint's warning rather than re-deriving it; the first is a
+   frontmatter read. Whether a result is a null stays a judgment.
+
+   Deferred items go under a heading "Waiting on", each with its trigger in plain language. Never
+   propose a deferred item unless the pre-check printed `FIRED` for it or, for a text trigger, you
+   argue that the trigger fired and cite the evidence in the footer.
+
+   A verdict is advice, never drift: `next` writes nothing to `graph/` under every `reconcile`
+   value, and no status transition follows from a verdict without the user's say. A stale gate, a
+   crossed exit, and a fired trigger are reported here and proposed at reconcile.
 
 **Human-readable is the contract, not a nice-to-have.** Write it the way a colleague would brief
 you. Name the real things in plain language (the reflexion cascade, the local labeling run, the
@@ -398,10 +505,17 @@ support, but they are invisible to the reader.
 **The trace footer is the only place IDs appear.** End with a single, skippable section headed
 exactly "Where this came from" that maps the claims and proposals back to the node IDs behind them,
 for a reader who wants to verify a surprising claim. Cite only nodes that exist; never invent an ID.
-Everything above the footer must stand on its own without it.
+Everything above the footer must stand on its own without it. The footer carries two pinned lines:
+`Pre-check:` followed by the `PRECHECK:` block verbatim (from its `PRECHECK:` line through the last
+finding or `precheck: silent`), and then `Verdict rests on:` followed by the node IDs the verdict
+rests on under the burden of proof above. The quoted block runs from the `Pre-check:` line to the
+`Verdict rests on:` line, inside a fenced code block if you prefer, so put nothing else between
+them. A `Verdict rests on:` line with no real node ID is a missing verdict. Any evidence that a
+text trigger fired is cited here too.
 
-Honor `verbosity`: `succinct` trims the brief toward the arc summary and keeps the proposals and the
-footer; `off` still answers when asked directly (this is on-demand, not an automatic surface). Works
+Honor `verbosity`: `succinct` trims the brief toward the arc summary and keeps the verdict, the
+proposals or the triggers, and the footer; `off` still answers when asked directly (this is
+on-demand, not an automatic surface) and keeps the `Verdict:` line and the footer. Works
 in any tendrel repo with no other plugins installed. If there is no `graph/`, or it exists but has
 no nodes yet, the repo isn't scaffolded for planning; offer to scaffold or point to `/tendrel:seed`
 rather than planning from nothing (there is no history to synthesize).

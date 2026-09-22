@@ -50,6 +50,11 @@ Reconcile runs when you ask, via `/tendrel:reconcile` or *"reconcile the graph."
 4. Appends any system friction to the friction log.
 5. Keeps its output terse and returns control to you.
 
+A completed experiment whose result crosses its `abandon_if`, and a deferred item whose
+`reopen_when` trigger fires, are each raised as their own separate yes or no at the end of the
+sweep, under every `reconcile` value, `ask` and `auto` alike: reconcile never writes
+`exit_outcome` or moves a status off `deferred` unasked.
+
 Because nothing forces it, the SessionStart report is the drift backstop: if the graph looks
 behind at session open, that's your cue to reconcile.
 
@@ -64,7 +69,10 @@ carries their meaning, so two nodes each claiming the other is always wrong), in
 statuses, duplicate IDs, `depends_on` cycles, `provenance:` paths that do not resolve, and the
 invalidation-consistency rule. That rule is transitive: a node that `depends_on` an `invalidated`
 (or already-`blocked`) node must itself be `blocked`, so an invalidation that only propagated one
-level down a chain still fails the check. It exits non-zero on errors and never writes to `graph/`.
+level down a chain still fails the check. It also warns, never errors, on a planned experiment
+that has a `config` and no `abandon_if`, on a complete experiment carrying a `validates` edge with
+no `compared_to`, and on a node-form `reopen_when` naming a node that does not exist. It exits
+non-zero on errors and never writes to `graph/`.
 
 Repair is judgment, so it stays with the model and stays approval-gated. On error-severity
 violations, Claude summarizes them and offers to fix them through the same reconcile behavior it
@@ -78,6 +86,12 @@ first body line before linking it for the first time, and after writing edges to
 `graph-lint.sh --explain`, which prints each edge with its target's first line, and review the
 rendered lines before the sweep ends. A wrong target is obvious on sight. Both habits are pinned
 sentences in the skill, and their compliance is measured, not assumed.
+
+With `--precheck`, a `PRECHECK:` block prints first: one line per stale gate, pending or crossed
+exit, deferred item, and fired reopen trigger, then a `FUTILITY` or `JUDGMENT` summary, or a
+literal `precheck: silent` when nothing fires. It enumerates and never judges, the same way
+`--explain` renders and never judges; `/tendrel:next` runs it first and quotes the block verbatim
+in its footer.
 
 ## Provenance and calibration
 
@@ -104,14 +118,25 @@ drifts). See a rendered example: [`../examples/doc-search/status.md`](../example
 ## Planning forward (next, on demand)
 
 `/tendrel:next` is the forward-looking counterpart to `status.md`. Where status is a snapshot of
-*state*, next is a synthesis of *history into next steps*: it lints the graph, reads all of it, and
-returns a plain-language brief (what is validated and what it rests on, what was ruled out, open
-theories and their gates, ideas never pursued) plus 2-3 grounded next-experiment proposals, each
-saying why now and what to skip because you already ruled it out. It is read-only, it proposes and
+*state*, next is a synthesis of *history into next steps*: it runs the lint's `--precheck` flag
+first, reads the whole graph, and returns a plain-language brief (what is validated and what it
+rests on, what was ruled out, open theories and their gates, ideas never pursued, the pre-check's
+findings) that ends in exactly one verdict, on one body line: `continue`, `conclude`, or `wait`.
+`continue` keeps 2-3 grounded next-experiment proposals, each saying why now, what to skip because
+you already ruled it out, and the losing outcome that would end its line. `conclude` states what
+stands, what it rests on, and what would reopen the line. `wait` names what unlocks the work,
+listing every trigger. The pre-check decides first when it can (a `FUTILITY` finding forces
+`wait` with no judgment call, and nothing open or deferred forces `conclude` or `continue`, never
+`wait`); otherwise the model judges under a burden of proof, naming a discriminating experiment
+for `continue` or the settling nodes for `conclude`/`wait`. It is read-only, it proposes and
 writes nothing, and it deliberately keeps node IDs out of the brief and proposals (they read like a
 colleague briefing you, not a list of references); a skippable "Where this came from" footer is the
-only place IDs appear, for verifying a surprising claim. Output goes to the transcript, not a file:
-it is advice, not state, and a stale plan on disk would be exactly the drift tendrel warns about.
+only place IDs appear, carrying two pinned lines, `Pre-check:` (the block verbatim) and `Verdict
+rests on:` (the node IDs behind the verdict), for verifying a surprising claim or the verdict's
+grounds. A verdict is advice, never drift: `next` writes nothing to `graph/` under any `reconcile`
+value, and no status transition follows from it without your say. Output goes to the transcript,
+not a file: it is advice, not state, and a stale plan on disk would be exactly the drift tendrel
+warns about.
 
 ## Configuration and background execution
 

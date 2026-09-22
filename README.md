@@ -51,9 +51,9 @@ just talking. Nothing ever interrupts you mid-task.
 | **Reconcile** | On demand, `/tendrel:reconcile` or *"reconcile the graph"* | Folds recent work into `graph/`: new/updated nodes, status transitions, edges; traces downstream on an invalidation; appends friction. |
 | **Status view** | On demand, `/tendrel:status` or *"regenerate status.md"* | Regenerates `status.md`: a mermaid diagram of your graph plus text sections (theories by stage, nodes by evidence status, decisions, ideas). |
 | **Seed** | On demand, `/tendrel:seed` or *"seed the graph"* | Guided first-population of an empty graph from your project's current state; proposes nodes for approval before writing. |
-| **Lint** | On demand, `/tendrel:lint` or *"lint the graph"* | Runs a deterministic, read-only integrity check over `graph/`: dangling edges (node IDs and repo-relative paths), mutual or reversed `invalidated_by`/`supersedes`/`part_of` pairs, invalid kinds/statuses, duplicate IDs, `depends_on` cycles, invalidation-consistency, and `provenance:` paths that don't resolve. `--explain` renders each edge with its target's first line. On errors, offers approval-gated repair; never auto-writes. |
+| **Lint** | On demand, `/tendrel:lint` or *"lint the graph"* | Runs a deterministic, read-only integrity check over `graph/`: dangling edges (node IDs and repo-relative paths), mutual or reversed `invalidated_by`/`supersedes`/`part_of` pairs, invalid kinds/statuses, duplicate IDs, `depends_on` cycles, invalidation-consistency, and `provenance:` paths that don't resolve; also warns on a planned experiment missing `abandon_if`, a complete experiment missing `compared_to`, and a `reopen_when` naming a missing node. `--explain` renders each edge with its target's first line; `--precheck` prints the stale-gate/exit/deferred/futility block that `/tendrel:next` quotes. On errors, offers approval-gated repair; never auto-writes. |
 | **Calibrate** | On demand, `/tendrel:calibrate` or *"are my numbers checkable?"* | Measures whether the numbers in your graph could be checked against the artifacts they cite: how many nodes assert precise figures, how many declare `provenance:`, how often a figure is found in its cited artifact, and how often it matches an unrelated one by chance. Read-only diagnostic; writes nothing. |
-| **Next** | On demand, `/tendrel:next` or *"what should we run next?"* | Reads the whole graph and returns a plain-language state-of-the-investigation brief plus 2-3 grounded next-experiment proposals, each with why-now and what-to-skip (the things you already ruled out). Read-only; writes nothing. |
+| **Next** | On demand, `/tendrel:next` or *"what should we run next?"* | Reads the whole graph and returns a plain-language state-of-the-investigation brief that ends in one verdict, continue, conclude, or wait, with 2-3 grounded next-experiment proposals when it's continue, each with why-now and what-to-skip (the things you already ruled out). Read-only; writes nothing. |
 | **Dependency query** | On demand, natural language | *"what depends on NODE-004?"* / *"what's blocking THEORY-002?"*, traversal over the typed edges. |
 | **Wiki ingest** | On demand, natural language | *"fold `raw/paper.pdf` into the wiki"*, reference knowledge into `wiki/` concept pages. |
 
@@ -94,11 +94,11 @@ flowchart LR
 
 | Kind | ID | Lifecycle |
 |---|---|---|
-| `experiment` | `EXP-` | planned · running · complete · abandoned |
+| `experiment` | `EXP-` | planned · running · complete · abandoned · deferred |
 | `theory` | `THEORY-` | idea · backtest · paper_trade · live_small · live_full · shelved |
 | `pipeline_node` | `NODE-` | untested · assumed_working · validated · invalidated · blocked |
 | `decision` | `DEC-` | active · under_review · reversed |
-| `idea` | `IDEA-` | open · promoted · dropped |
+| `idea` | `IDEA-` | open · promoted · dropped · deferred |
 | `observation` | `OBS-` | (none) |
 
 An **annotated node** is YAML frontmatter (flat, one field per line) plus a lab-notebook body:

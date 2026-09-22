@@ -40,6 +40,7 @@ if [ "$run_contracts" -eq 1 ]; then
   run next-integration.sh
   run provenance-integration.sh
   run edge-review-integration.sh
+  run exit-reopen-integration.sh
 fi
 
 echo "==================================="

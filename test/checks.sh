@@ -84,6 +84,47 @@ grep -qF 'review each rendered line' plugin/skills/research-graph/SKILL.md \
 grep -qF -- '--explain' plugin/commands/lint.md \
   && ok "--explain named in lint.md" || no "--explain named in lint.md"
 
+# 3f. stop-bundle contracts survive edits. The three pinned lines are what the verdict harness
+#     (test/next-integration.sh) reads: it counts `Verdict:` lines, diffs the `Pre-check:` block
+#     against the script's own output, and checks the IDs after `Verdict rests on:`. The prose
+#     sentences are the only thing keeping an exit, a deferral, and a fired trigger propose-only;
+#     next.md must name --precheck or step 1 runs the lint without the block the footer quotes.
+S=plugin/skills/research-graph/SKILL.md
+# harness VERDICT_ONE: exactly one body line begins with this token
+grep -qF 'Verdict:' "$S" && ok "Verdict: line pinned in SKILL.md" \
+  || no "Verdict: line pinned in SKILL.md" "the harness counts 'Verdict:' lines"
+# harness PRECHECK_QUOTED: the footer block after this token is diffed against the script
+grep -qF 'Pre-check:' "$S" && ok "Pre-check: footer line pinned in SKILL.md" \
+  || no "Pre-check: footer line pinned in SKILL.md" "the harness diffs the block after 'Pre-check:'"
+# harness GROUNDS_OK: the IDs after this token are the burden of proof
+grep -qF 'Verdict rests on:' "$S" && ok "Verdict rests on: footer line pinned in SKILL.md" \
+  || no "Verdict rests on: footer line pinned in SKILL.md" "the harness reads IDs after 'Verdict rests on:'"
+# KD6/KD11: exit_outcome and reopening are proposed under every reconcile value, including auto
+grep -qF 'never applied' "$S" && ok "exit marker never-applied rule present in SKILL.md" \
+  || no "exit marker never-applied rule present in SKILL.md" "'never applied' keeps exit_outcome propose-only under auto"
+# A user narrating a crossed number is logging a result, not answering a proposal; the exit-reopen
+# harness caught the sweep writing the marker on that narration (ask arm, 1 of 5) before this line.
+grep -qF 'A narrated result is never a yes' "$S" && ok "narrated-result-is-not-consent rule present in SKILL.md" \
+  || no "narrated-result-is-not-consent rule present in SKILL.md" "the exit-reopen harness NO_MARKER gate depends on it"
+# R11: a deferral the scripts can see is a status plus reopen_when, not prose in the body
+grep -qF 'A deferral is a status and a trigger' "$S" && ok "deferral-is-status-and-trigger rule present in SKILL.md" \
+  || no "deferral-is-status-and-trigger rule present in SKILL.md" "a body-note deferral is invisible to the pre-check"
+# R19: a status transition looks for reopen_when lines that name it, in the same turn
+grep -qF 'propose reopening each match in the same turn' "$S" && ok "reopen-on-transition rule present in SKILL.md" \
+  || no "reopen-on-transition rule present in SKILL.md" "without it a fired trigger waits for the next session start"
+# R10: a proposal's losing outcome becomes the experiment's abandon_if when the node is created
+grep -qF 'carry the proposal'"'"'s losing outcome into `abandon_if`' "$S" && ok "abandon_if carry-over rule present in SKILL.md" \
+  || no "abandon_if carry-over rule present in SKILL.md" "the exit is pre-registered at creation or never"
+# R21: a verdict writes nothing to graph/ under any reconcile value (harness NO_WRITE)
+grep -qF 'advice, never drift' "$S" && ok "verdict-is-advice rule present in SKILL.md" \
+  || no "verdict-is-advice rule present in SKILL.md" "the harness checks the graph hash is unchanged after next"
+# next.md step 1 must run the lint with the flag whose block the footer quotes
+grep -qF -- '--precheck' plugin/commands/next.md \
+  && ok "--precheck named in next.md" || no "--precheck named in next.md"
+# A pending exit or fired trigger from an earlier session reaches the sweep that did not cause it
+grep -qF 'whether or not this sweep caused it' "$S" && ok "sweep-reads-precheck rule present in SKILL.md" \
+  || no "sweep-reads-precheck rule present in SKILL.md" "without it a reconcile only proposes the exits and triggers it caused itself"
+
 # 4. no em dashes in user-facing docs and commands (SKILL.md and spike fixtures excluded:
 #    SKILL.md carries known pre-existing em dashes).
 #    Only TRACKED docs are scanned. docs/plans/ is gitignored working material, and walking the

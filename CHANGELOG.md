@@ -3,6 +3,76 @@
 All notable changes to tendrel. Versions follow semver. The self-hosted marketplace serves the
 default branch, so the latest tagged version is what installs pull on `/plugin marketplace update`.
 
+## 0.10.0 - 2026-09-19 - Next Can Say Stop
+
+### Added
+- **A verdict that can say stop.** `/tendrel:next` now ends in exactly one verdict, on one body
+  line: `continue` keeps its 2-3 proposals, each carrying the losing outcome that would end it;
+  `conclude` states what stands, what it rests on, and what would reopen the line; `wait` names
+  what unlocks the work. A deterministic pre-check flag on the lint (`graph-lint.sh --precheck`)
+  runs first and enumerates stale gates, pending and crossed exits, deferred items, and fired
+  triggers from committed graph state alone; a `FUTILITY` finding decides `wait` with no judgment
+  call, and a graph with nothing open or deferred is never `wait`. The model judges the rest under
+  a burden of proof: a `continue` names a non-terminal node whose next result would change what
+  the graph says, a `conclude` or `wait` names the nodes that settle it. Two pinned footer lines,
+  `Pre-check:` (the block verbatim) and `Verdict rests on:` (the node IDs), let a reader check the
+  grounds. A verdict is advice, never drift: `next` still writes nothing to `graph/` under any
+  `reconcile` value.
+- **Pre-registered exits.** Experiments accept four optional flat fields: `abandon_if` (the number
+  or outcome that ends the line, written before the run), `compared_to` (the null or comparison
+  group), `bound` (the effect size a null excludes), and `exit_outcome` (`crossed` or
+  `overridden`), a flat marker that keeps a crossed run `complete` with its real result and
+  records a decline once so it is never re-raised. The lint warns, never errors, on a planned
+  experiment with a `config` and no `abandon_if`, and on a complete experiment carrying `validates`
+  with no `compared_to`. When reconcile records a result that crosses its `abandon_if`, it proposes
+  `exit_outcome: crossed` as its own separate yes or no, never bundled and never applied under any
+  `reconcile` value.
+- **Deferred, with a reopen trigger.** Ideas and experiments accept the additive status `deferred`
+  and an optional `reopen_when`; the node form `<NODE-ID> <status>` is machine-checkable, and
+  anything else is a text trigger that is listed and never evaluated by a script. The lint warns,
+  never errors, on a node-form `reopen_when` naming a node that does not exist. A fired node-form
+  trigger is proposed for reopening at reconcile, never applied unasked, under every `reconcile`
+  value.
+- **Session-start lines and a status.md section.** The SessionStart report names deferred items
+  whose trigger has fired and counts the rest ("Deferred, trigger fired: ...", "Deferred, waiting:
+  N item(s)"), read from the lint's `--precheck` output and silent under `verbosity = off`.
+  `status.md` gains a "Deferred, reopen when" section listing each deferred item with its trigger,
+  and its diagram styles deferred nodes distinctly from open, invalidated, and blocked ones.
+- **Two contract harnesses.** `test/next-integration.sh` measures the verdict against six
+  fixtures (continue, continue-no-planned, unbounded-null, conclude, fired-trigger, futility) with hard
+  no-false-stop gates. Measured 2026-09-19, N=5 per fixture, CLI default model
+  (claude-fable-5-1), 0 of 25 runs errored: the continue and unbounded-null fixtures never
+  returned conclude or wait, `NO_FALSE_STOP` 5/5 and `GROUNDS_OK` 5/5 on every fixture;
+  `PRECHECK_QUOTED` 5/5 on every fixture; the conclude fixture returned conclude 5/5; the
+  fired-trigger fixture surfaced the deferred idea 5/5 with `FIRED` quoted.
+  `test/exit-reopen-integration.sh` measures that an exit and a reopening are proposed, never
+  applied. Measured 2026-09-19, N=5, claude-fable-5-1: on the first pass, before the skill
+  carried "A narrated result is never a yes," the `ask+crossed` arm's `NO_MARKER` rate was 4/5
+  (one run wrote `exit_outcome: crossed` on the strength of the prompt's own framing and reported
+  it instead of asking, the hard check failing as designed). After that sentence landed,
+  re-measured:
+  `auto+crossed` and `ask+crossed` both `NO_ABANDON` 5/5, `NO_MARKER` 5/5, `PROPOSAL` 5/5,
+  `SEPARATE` 5/5; `auto+not-crossed` `NO_ABANDON` 5/5, `NO_MARKER` 5/5, false `PROPOSAL` 0/5;
+  `auto+fired` `STAYS_DEFERRED` 5/5 and `REOPEN` 5/5; 0 errored across every arm.
+  After review fixes (a sixth `futility` fixture, whole-graph and whole-frontmatter hard gates,
+  the installed plugin copy disabled in each fixture), re-measured N=5: `futility` returned wait
+  5/5 with `FUTILITY` quoted (claude-fable-5-1); on claude-opus-5-5, `continue` returned continue
+  5/5 with `NO_FALSE_STOP` 5/5; both crossed arms held every hard gate 5/5 with `PROPOSAL` 5/5;
+  `auto+not-crossed` held every hard gate 5/5, with the proposal detector firing in 2 of 10 runs,
+  both of which stated in words that the exit was not crossed; `auto+fired` `STAYS_DEFERRED` 5/5,
+  `REOPEN` 4/5.
+
+### Compatibility
+- Additive in every surface; no existing graph gains a new error. Newly failing patterns: none.
+  New warnings, never errors: a planned experiment with a `config` and no `abandon_if`; a complete
+  experiment carrying `validates` with no `compared_to`; a node-form `reopen_when` naming a node
+  that does not exist, or a status that node's kind cannot hold (such a trigger can never fire, so
+  the pre-check counts it as a judgment call, never as futility). The doc-search example (`examples/doc-search`) gained a `compared_to` line
+  on `EXP-002` to stay at zero warnings under the new check. On the maintainer's 131-node graph the
+  warning count rose from 31 to 43, all `compared_to` warnings, with no new errors. The legacy
+  byte-identical lint output pin and the backwards-compat sweep (including the new `stop-bundle`
+  compat graph) both pass. Stacks on 0.9.0.
+
 ## 0.9.0 - 2026-09-04
 
 ### Added

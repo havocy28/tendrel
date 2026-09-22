@@ -12,8 +12,16 @@ skill** (`skills/research-graph/SKILL.md`) as the source of truth for how reconc
    experiments moving to `complete`/`abandoned` with results, pipeline nodes changing evidence
    status, new `depends_on`/`validates`/`invalidated_by` edges, ideas and observations captured.
    After writing edges, review them through the lint's `--explain` rendering, per the skill's
-   reconcile section.
+   reconcile section. Then run the lint with `--precheck` and read the `PRECHECK:` block after
+   the sweep; each `EXIT_PENDING` and `FIRED` line is a proposal per the skill's Graph lint
+   section, whether or not this sweep caused it. A parked idea or experiment gets
+   `status: deferred` and a `reopen_when` trigger, never a body note.
 3. If a `pipeline_node` became `invalidated`, trace downstream and report what is now affected.
+   When a completed experiment carries `abandon_if` and no `exit_outcome`, weigh the result against
+   the exit and, if crossed, propose `exit_outcome: crossed` as a separate yes or no at the end of
+   the turn; it is never applied under any `reconcile` value, and a decline records `overridden`.
+   When a status transition fires a `reopen_when` trigger, propose reopening the deferred item in
+   the same turn; reopening is a proposal under every `reconcile` value, never an applied change.
 4. Append any friction about the system to the tool-global friction log
    (`${CLAUDE_PLUGIN_DATA}/FRICTION.md`), tagged **confidently-wrong** vs **incomplete**.
 5. Make only the reconcile edits, keep the summary terse, and return control to the user.

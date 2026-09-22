@@ -134,5 +134,146 @@ cfg "$T/clean" "verbosity = off
 reconcile = auto"
 eq "auto+off+clean graph stays silent" "$(run "$T/clean")" ""
 
+# --- deferred items and fired reopen triggers (0.10.0, R13 / AE8). The report shells out to
+# --- graph-lint.sh --precheck beside it and reads its DEFERRED and FIRED lines; it never evaluates
+# --- a trigger itself, so "fired" here is the pre-check's "fired".
+has(){ echo "$2" | grep -qF -- "$3" && ok "$1" || no "$1" "missing [$3]"; }
+hasnt(){ echo "$2" | grep -qF -- "$3" && no "$1" "present [$3]" || ok "$1"; }
+FIRED_LINE='Deferred, trigger fired: IDEA-001 (EXP-003 complete)'
+
+# fired: a deferred idea whose node-form trigger names a node now complete, plus an open theory so
+# the off+auto branch has drift to report (and must still say nothing about the deferred item).
+mkdir -p "$T/fired/graph"
+cat > "$T/fired/graph/IDEA-001.md" <<'EOF'
+---
+id: IDEA-001
+kind: idea
+status: deferred
+reopen_when: EXP-003 complete
+---
+Body.
+EOF
+cat > "$T/fired/graph/EXP-003.md" <<'EOF'
+---
+id: EXP-003
+kind: experiment
+status: complete
+---
+Body.
+EOF
+cp "$T/infodrift/graph/THEORY-001.md" "$T/fired/graph/THEORY-001.md"
+
+rm -f "$T/fired/.research-graph"
+F="$(run "$T/fired")"
+has "fired: normal names the item and its trigger (AE8)" "$F" "$FIRED_LINE"
+hasnt "fired: nothing left waiting, so no count line" "$F" "Deferred, waiting"
+cfg "$T/fired" "verbosity = normal"
+eq "fired: no-config default equals verbosity=normal" "$(run "$T/fired")" "$F"
+cfg "$T/fired" "verbosity = succinct"
+has "fired: succinct names the item and its trigger (AE8)" "$(run "$T/fired")" "$FIRED_LINE"
+cfg "$T/fired" "verbosity = off"
+hasnt "fired: off says nothing about deferred items (AE8)" "$(run "$T/fired")" "Deferred"
+cfg "$T/fired" "verbosity = off
+reconcile = auto"
+FO="$(run "$T/fired")"
+has "fired: off+auto still carries the instruction" "$FO" "reconcile = auto"
+hasnt "fired: off+auto says nothing about deferred items (KTD6)" "$FO" "Deferred"
+
+# waiting: an unfired node-form trigger, a text trigger, and a deferred item with no trigger are
+# counted, never named as fired; a fired item beside them is named and excluded from the count.
+mkdir -p "$T/waiting/graph"
+cat > "$T/waiting/graph/IDEA-002.md" <<'EOF'
+---
+id: IDEA-002
+kind: idea
+status: deferred
+reopen_when: EXP-003 complete
+---
+Body.
+EOF
+cat > "$T/waiting/graph/EXP-003.md" <<'EOF'
+---
+id: EXP-003
+kind: experiment
+status: planned
+---
+Body.
+EOF
+cat > "$T/waiting/graph/IDEA-003.md" <<'EOF'
+---
+id: IDEA-003
+kind: idea
+status: deferred
+reopen_when: when the vendor ships the v2 assay
+---
+Body.
+EOF
+cat > "$T/waiting/graph/EXP-004.md" <<'EOF'
+---
+id: EXP-004
+kind: experiment
+status: deferred
+---
+Body.
+EOF
+rm -f "$T/waiting/.research-graph"
+W="$(run "$T/waiting")"
+has "waiting: three unfired items are counted" "$W" "Deferred, waiting: 3 item(s)"
+hasnt "waiting: an unfired node-form trigger is never named as fired" "$W" "trigger fired"
+cfg "$T/waiting" "verbosity = succinct"
+has "waiting: succinct keeps the count" "$(run "$T/waiting")" "Deferred, waiting: 3 item(s)"
+cfg "$T/waiting" "verbosity = off"
+hasnt "waiting: off says nothing about deferred items" "$(run "$T/waiting")" "Deferred"
+
+mkdir -p "$T/mixed/graph"
+cp "$T/waiting/graph/"*.md "$T/mixed/graph/"
+cat > "$T/mixed/graph/IDEA-001.md" <<'EOF'
+---
+id: IDEA-001
+kind: idea
+status: deferred
+reopen_when: EXP-005 complete
+---
+Body.
+EOF
+cat > "$T/mixed/graph/EXP-005.md" <<'EOF'
+---
+id: EXP-005
+kind: experiment
+status: complete
+---
+Body.
+EOF
+M="$(run "$T/mixed")"
+has "mixed: the fired item is named" "$M" "Deferred, trigger fired: IDEA-001 (EXP-005 complete)"
+has "mixed: the fired item is excluded from the waiting count" "$M" "Deferred, waiting: 3 item(s)"
+hasnt "mixed: the unfired node-form trigger is not named as fired" "$M" "IDEA-002 ("
+
+# no deferred items: the existing golden is byte-identical (no new lines at all).
+hasnt "no deferred items: normal output carries no deferred line" "$NORMAL" "Deferred"
+
+# lint errors: the pre-check block prints regardless of the lint's exit code, so the fired line
+# still prints on a graph whose lint fails (here a dangling depends_on, an ERROR in the lint).
+mkdir -p "$T/errfired/graph"
+cp "$T/fired/graph/"*.md "$T/errfired/graph/"
+cp "$T/anom/graph/NODE-001.md" "$T/errfired/graph/NODE-001.md"
+bash "$REPO/plugin/scripts/graph-lint.sh" "$T/errfired" >/dev/null 2>&1 \
+  && no "errfired: fixture self-check (lint must fail)" "lint exited 0" || ok "errfired: fixture self-check (lint must fail)"
+E="$(run "$T/errfired")"
+has "errfired: fired line prints when the lint exits non-zero" "$E" "$FIRED_LINE"
+has "errfired: the WARN lines are still there" "$E" "WARN depends_on -> missing node"
+
+# fallback: a copy of the report with no graph-lint.sh beside it prints its existing lines
+# unchanged, no deferred lines, exit 0, JSON still a single line.
+mkdir -p "$T/alone"
+cp "$SCRIPT" "$T/alone/session-start-report.sh"
+rm -f "$T/fired/.research-graph"
+FB="$(printf '{"cwd":"%s"}' "$T/fired" | bash "$T/alone/session-start-report.sh")"; fb_rc=$?
+eq "fallback: exit 0" "$fb_rc" "0"
+hasnt "fallback: no deferred lines without the lint beside the report" "$FB" "Deferred"
+eq "fallback: existing lines unchanged" "$FB" "$(printf '%s' "$F" | sed "s/\\\\n$FIRED_LINE//")"
+eq "fallback: JSON is a single line" "$(printf '%s\n' "$FB" | wc -l)" "1"
+eq "fired: JSON is a single line" "$(printf '%s\n' "$F" | wc -l)" "1"
+
 echo "---"; echo "report-verbosity: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]
