@@ -20,6 +20,10 @@
 #                        the honest verdict is continue, never conclude.
 #   fired-trigger        doc-search plus IDEA-002 deferred behind `reopen_when: EXP-002 complete`;
 #                        EXP-002 is complete, so the pre-check prints FIRED for it.
+#   futility             the FUTILITY shape of test/graph-lint.sh case 69: one abandoned run, one
+#                        idea and one experiment deferred behind node-form triggers on it that have
+#                        not fired, no open idea, nothing planned or running, a theory at backtest.
+#                        The pre-check prints FUTILITY, which decides wait with no judgment call.
 #
 # Contract clauses, each read from the final result text or the stream-json, hard versus reported:
 #   1. VERDICT_ONE (hard, every fixture): exactly one line reads `Verdict: continue|conclude|wait`
@@ -36,16 +40,22 @@
 #      the others): graph/ hashes the same before and after the run. R21: advice, never drift.
 #   5. ID-FREE BODY and GROUNDED FOOTER (hard, every fixture): no node ID above the "Where this
 #      came from" footer; the footer cites >= 1 node and every ID it cites is real.
-#   6. PRECHECK_RUN (reported): an assistant Bash tool_use whose command contains `--precheck`,
-#      paired by id to a tool_result containing `PRECHECK:`. The skill text also carries the flag,
-#      so a tool_result alone is not a run (the EXPLAIN_RUN pattern of the edge-review harness).
+#   6. PRECHECK_RUN (reported): an assistant Bash tool_use whose command contains `--precheck` and
+#      runs the BRANCH lint (the literal plugin/scripts/graph-lint.sh path under this repo, or the
+#      `${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh` form that --plugin-dir resolves to it), paired
+#      by id to a tool_result containing `PRECHECK:`. The skill text also carries the flag, so a
+#      tool_result alone is not a run (the EXPLAIN_RUN pattern of the edge-review harness), and a
+#      run of some other copy of the lint on the machine is not a run of this branch's pre-check.
 #   7. PRECHECK_QUOTED (reported): the footer block from the `Pre-check:` line to the `Verdict
 #      rests on:` line (a code fence around it tolerated), non-blank and whitespace-normalized,
 #      equals the lint's own PRECHECK block on that fixture line for line; one line off is unquoted.
 #   8. FIRED_ONLY (reported, fired-trigger only): the deferred idea's distinctive phrase appears in
 #      the body only when the quoted block carries that idea's FIRED line.
-#   9. Conclude rate on the conclude fixture, decoy citations, and negative-grounding language:
-#      reported, never asserted.
+#   9. WAIT_FUTILITY (hard, futility fixture): every run whose verdict is wait quotes a FUTILITY
+#      line in its `Pre-check:` block; a wait is decided by that finding, so a wait without it is
+#      ungrounded. The wait rate itself is reported the way the conclude rate is, never asserted.
+#  10. Conclude rate on the conclude fixture, wait rate on the futility fixture, decoy citations,
+#      and negative-grounding language: reported, never asserted.
 #
 # Every detector has a deterministic self-check on synthetic text, stream-json, or a synthetic
 # graph edit; `--selfcheck-only` runs those and exits before any model call. A headless rate is a
@@ -62,10 +72,17 @@
 #   fired-trigger: continue 5/5, FIRED_ONLY 5/5 (idea surfaced in 5/5 with FIRED quoted), PRECHECK_QUOTED 5/5.
 #   VERDICT_ONE, ID-free body, grounded footer, PRECHECK_RUN, NO_WRITE: 5/5 on every fixture.
 #
-# COSTS MODEL TOKENS: every iteration is a real `claude -p` run (N runs per fixture, 5 fixtures).
+# After the review fixes (futility fixture added, installed marketplace copy disabled per fixture):
+#   futility (2026-09-19, claude-fable-5-1): wait 5/5, WAIT_FUTILITY 5/5, VERDICT_ONE 5/5,
+#     GROUNDS_OK 5/5, NO_WRITE 5/5, PRECHECK_QUOTED 5/5, 0 errored.
+#   continue re-measured (2026-09-22, claude-opus-5-5): continue 5/5, NO_FALSE_STOP 5/5,
+#     GROUNDS_OK 5/5, PRECHECK_QUOTED 5/5, decoy cited 2/5 (beside a non-terminal node, so
+#     grounded), 0 errored.
+#
+# COSTS MODEL TOKENS: every iteration is a real `claude -p` run (N runs per fixture, 6 fixtures).
 #
 # Usage:   bash test/next-integration.sh [N] [fixture ...]   (N model runs per fixture, default 3;
-#                                                              fixtures default to all five)
+#                                                              fixtures default to all six)
 #          bash test/next-integration.sh --selfcheck-only    (detector checks only, no model)
 # Env:     TENDREL_TEST_MODEL=<model>  to run a cheaper model and cut cost.
 set -uo pipefail
@@ -76,7 +93,7 @@ N="${1:-3}"
 case "$N" in (''|*[!0-9]*) echo "N must be a positive integer, got '$N'" >&2; exit 2;; esac
 [ "$N" -ge 1 ] || { echo "N must be >= 1, got $N" >&2; exit 2; }
 shift 2>/dev/null || true
-ALL_FIXTURES="continue continue-no-planned unbounded-null conclude fired-trigger"
+ALL_FIXTURES="continue continue-no-planned unbounded-null conclude fired-trigger futility"
 FIXTURES="${*:-$ALL_FIXTURES}"
 for fx in $FIXTURES; do case " $ALL_FIXTURES " in *" $fx "*) ;; *) echo "unknown fixture '$fx' (choose from: $ALL_FIXTURES)" >&2; exit 2;; esac; done
 MODEL="${TENDREL_TEST_MODEL:-}"
@@ -92,7 +109,11 @@ DECOY=EXP-004          # the settled decoy on the continue fixtures; checked by 
 DEFERRED_ID=IDEA-002   # the deferred idea on the fired-trigger fixture
 DEFERRED_PHRASE='splade|learned sparse'   # its distinctive phrase, the only way an ID-free body can name it
 
-enable(){ mkdir -p "$1/.claude"; printf '{"enabledPlugins":{"tendrel@tendrel":true}}' > "$1/.claude/settings.local.json"; }
+# The branch is what --plugin-dir loads. The marketplace copy installed on this machine is older
+# (no `deferred`, no `--precheck`) and is DISABLED in the fixture, so the model never sees two
+# tendrel skills and never runs the older lint by mistake; the skill still activates from the
+# --plugin-dir copy (probed 2026-09-19 under `claude -p`).
+enable(){ mkdir -p "$1/.claude"; printf '{"enabledPlugins":{"tendrel@tendrel":false}}' > "$1/.claude/settings.local.json"; }
 mkdoc(){ mkdir -p "$1/graph"; cp "$REPO"/examples/doc-search/graph/*.md "$1/graph/"; enable "$1"; }
 
 # --- Fixture builders. Each takes a directory and leaves a complete fixture there. ---
@@ -307,13 +328,66 @@ edges:
 Swap BM25 for a learned sparse retriever (SPLADE) on the keyword side of the hybrid index, once the hybrid comparison has finished.
 ND
 }
+mk_futility(){ # the FUTILITY shape of test/graph-lint.sh case 69: every deferred item waits on a
+  # node-form trigger that has not fired, and nothing blocking is open (no open idea, no planned or
+  # running experiment). A theory at backtest is present and never enters the rule.
+  mkdir -p "$1/graph"; enable "$1"
+  cat > "$1/graph/THEORY-001.md" <<'ND'
+---
+id: THEORY-001
+kind: theory
+status: backtest
+confidence: moderate
+next_gate: "reranker gain of at least 2 pts nDCG@10 on 200 held-out queries -> paper_trade"
+---
+A cross-encoder reranker recovers most of the precision lost to naive chunking.
+ND
+  cat > "$1/graph/EXP-001.md" <<'ND'
+---
+id: EXP-001
+kind: experiment
+status: abandoned
+question: "Does a cross-encoder reranker beat no reranker on the hybrid top-50, at n=200?"
+config: {reranker: cross-encoder, k: 50, n: 200}
+abandon_if: "no gain by the 100-query checkpoint"
+edges:
+  - {rel: part_of, to: THEORY-001}
+---
+Stopped early: the GPU budget for the quarter ran out at the 40-query mark, before the checkpoint. The two items parked behind this run wait on a status it no longer holds and will not reach on its own.
+ND
+  cat > "$1/graph/IDEA-001.md" <<'ND'
+---
+id: IDEA-001
+kind: idea
+status: deferred
+reopen_when: EXP-001 complete
+edges:
+  - {rel: motivated_by, to: THEORY-001}
+---
+Distill the cross-encoder into a lighter reranker once the full-size one has a measured gain to distill from.
+ND
+  cat > "$1/graph/EXP-002.md" <<'ND'
+---
+id: EXP-002
+kind: experiment
+status: deferred
+question: "Does the reranker gain hold on table and figure queries specifically?"
+config: {reranker: cross-encoder, k: 50, n: 60, queries: table-and-figure}
+reopen_when: EXP-001 complete
+edges:
+  - {rel: part_of, to: THEORY-001}
+---
+Parked behind the main reranker run: a per-slice check only makes sense once the overall gain is known.
+ND
+}
 mkfix(){ # $1=fixture name $2=dir
   case "$1" in
     continue) mk_continue "$2";; continue-no-planned) mk_continue_no_planned "$2";;
     conclude) mk_conclude "$2";; unbounded-null) mk_unbounded_null "$2";; fired-trigger) mk_fired_trigger "$2";;
+    futility) mk_futility "$2";;
   esac
 }
-expect_of(){ case "$1" in conclude) echo conclude;; *) echo continue;; esac; }   # the honest verdict per fixture
+expect_of(){ case "$1" in conclude) echo conclude;; futility) echo wait;; *) echo continue;; esac; }   # the honest verdict per fixture
 
 real_ids(){ for f in "$1"/graph/*.md; do basename "$f" .md; done; }
 is_real(){ [ -f "$1/graph/$2.md" ]; }   # $1=fixture dir $2=id
@@ -331,7 +405,9 @@ body_ids(){ body_of | grep -oE "$ID_RE" | sort -u; }
 footer_ids(){ footer_of | grep -oE "$ID_RE" | sort -u; }
 # VERDICT_ONE: the verdict lines, one word each, lowercased. `Verdict rests on:` never matches
 # (the colon must follow the word), and the verdict word may sit inside emphasis after the colon.
-verdict_words(){ strip_markup | grep -iE '^Verdict:[*_[:space:]]*(continue|conclude|wait)\b' | grep -oiE 'continue|conclude|wait' | tr 'A-Z' 'a-z'; }
+# Only the word that follows the token is taken: a conforming `Verdict: continue. Do not conclude
+# yet; wait for the gate.` is one line and one word, whatever the rest of the sentence says.
+verdict_words(){ strip_markup | sed -nE 's/^Verdict:[*_[:space:]]*(continue|conclude|wait)\b.*$/\1/Ip' | tr 'A-Z' 'a-z'; }
 verdict_count(){ verdict_words | grep -c .; }
 # GROUNDS_OK: the IDs on the `Verdict rests on:` line(s) only, not the trace mapping under it.
 grounds_ids(){ strip_markup | grep -E '^Verdict rests on:' | grep -oE "$ID_RE" | sort -u; }
@@ -374,12 +450,15 @@ detect_quoted(){ # $1=fixture dir; text on stdin -> 0|1
   local got want; got=$(quoted_block | norm_block); want=$(expected_block "$1" | norm_block)
   [ -n "$want" ] && [ "$got" = "$want" ] && echo 1 || echo 0
 }
-# PRECHECK_RUN: assistant tool_use blocks only, Bash only, command containing --precheck, AND the
-# tool_result paired to it by id contains `PRECHECK:`. The skill text arrives in a tool_result and
-# mentions the flag; that is not a run, and neither is a command whose result never arrived.
+# PRECHECK_RUN: assistant tool_use blocks only, Bash only, command containing --precheck AND the
+# branch's lint (the literal `$LINT` path, or `${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh`, which
+# --plugin-dir resolves to the branch), AND the tool_result paired to it by id contains
+# `PRECHECK:`. The skill text arrives in a tool_result and mentions the flag; that is not a run,
+# neither is a command whose result never arrived, and neither is a `--precheck` run of some other
+# copy of the lint on the machine (an older installed copy has no such flag and prints usage).
 detect_precheck_run(){ # $1=stream-json text -> 0|1
   local n
-  n=$(printf '%s' "$1" | jq -rs '
+  n=$(printf '%s' "$1" | jq -rs --arg lint "$LINT" '
         ([.[] | select(.type=="user") | .message.content[]? | select(.type=="tool_result")
           | select(.tool_use_id != null)
           | {key: .tool_use_id, value: (if (.content | type) == "array"
@@ -388,6 +467,7 @@ detect_precheck_run(){ # $1=stream-json text -> 0|1
         | [.[] | select(.type=="assistant") | .message.content[]?
           | select(.type=="tool_use") | select(.name=="Bash")
           | select((.input.command // "") | contains("--precheck"))
+          | select((.input.command // "") | (contains($lint) or test("\\$\\{?CLAUDE_PLUGIN_ROOT\\}?/scripts/graph-lint\\.sh")))
           | $result[.id // ""] // ""
           | select(contains("PRECHECK:"))] | length' 2>/dev/null)
   [ "${n:-0}" -gt 0 ] 2>/dev/null && echo 1 || echo 0
@@ -400,6 +480,11 @@ detect_fired_only(){ # text on stdin -> 1(absent) | 1(surfaced) | 0[surfaced-wit
   if printf '%s\n' "$t" | body_of | grep -qiE "$DEFERRED_PHRASE"; then
     printf '%s\n' "$t" | quoted_block | norm_block | grep -q "^FIRED $DEFERRED_ID " && echo "1(surfaced)" || echo "0[surfaced-without-FIRED]"
   else echo "1(absent)"; fi
+}
+# WAIT_FUTILITY: a `wait` verdict is decided by the pre-check's FUTILITY finding, so the quoted
+# block in the footer must carry a FUTILITY line. Read on runs whose verdict is wait.
+detect_wait_futility(){ # text on stdin -> 0|1
+  quoted_block | norm_block | grep -q '^FUTILITY ' && echo 1 || echo 0
 }
 result_text(){ printf '%s' "$1" | jq -rs 'last(.[] | select(.type=="result") | .result) // ""' 2>/dev/null; }
 
@@ -458,6 +543,10 @@ sc "heading '## Verdict: continue' counts as exactly one" "$(printf '%s\n' 'Brie
 sc "two Verdict lines count as two (VERDICT_ONE fails)" "$(printf '%s\n' 'Verdict: continue' 'text' '- Verdict: conclude' | verdict_count)" 2
 sc "no Verdict line counts as zero" "$(printf '%s\n' 'The verdict is to continue.' 'Verdict rests on: EXP-003' | verdict_count)" 0
 sc "'Verdict rests on:' is not a verdict line, and the word is read" "$(printf '%s\n' 'Verdict: **wait**' 'Verdict rests on: IDEA-002' | verdict_words)" wait
+CTL_VERDICT_PROSE='**Verdict:** continue. Do not conclude yet; wait for the gate.'
+sc "verdict line whose sentence goes on to say conclude and wait counts as one" "$(printf '%s\n' "$CTL_VERDICT_PROSE" | verdict_count)" 1
+sc "and the word read from it is the one after the token" "$(printf '%s\n' "$CTL_VERDICT_PROSE" | verdict_words)" continue
+sc "'Verdict: continued' is not a verdict word" "$(printf '%s\n' 'Verdict: continued' | verdict_count)" 0
 
 # GROUNDS_OK on the continue fixture (decoy EXP-004 is complete; EXP-003 is running)
 sc "continue resting on the running experiment -> GROUNDS_OK 1" "$(printf '%s\n' "$FOOTER_HDR" 'Verdict rests on: EXP-003, EXP-002' | grounds_check "$FIX" continue "$DECOY")" 1
@@ -485,26 +574,33 @@ sc "block differing from the script by one line -> PRECHECK_QUOTED 0" "$(printf 
 sc "no Pre-check: line at all -> PRECHECK_QUOTED 0" "$(printf '%s\n' "$FOOTER_HDR" 'Verdict rests on: EXP-003' | detect_quoted "$FIX")" 0
 sc "Pre-check: line with prose instead of the block -> PRECHECK_QUOTED 0" "$(printf '%s\n' "$FOOTER_HDR" 'Pre-check: silent apart from the crossed exit' 'Verdict rests on: EXP-003' | detect_quoted "$FIX")" 0
 
-# PRECHECK_RUN on synthetic stream-json
-sc "assistant Bash --precheck tool_use paired with a PRECHECK: result -> PRECHECK_RUN 1" "$(detect_precheck_run "$(printf '%s\n' \
-  '{"type":"system","subtype":"init"}' \
-  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"bash /p/plugin/scripts/graph-lint.sh --precheck .","description":"lint with the pre-check"}}]}}' \
-  '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"PRECHECK:\nGATE_CONTEXT THEORY-001 2 completed experiments\nprecheck: silent\n\ngraph-lint: 12 node(s) in ./graph\nclean: no integrity problems found.\n\n0 error(s), 0 warning(s)."}]}]}}' \
-  '{"type":"result","subtype":"success","result":"done"}')")" 1
+# PRECHECK_RUN on synthetic stream-json. PRE_RESULT is a real-looking PRECHECK block in a result.
+PRE_RESULT='{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"PRECHECK:\nGATE_CONTEXT THEORY-001 2 completed experiments\nprecheck: silent\n\ngraph-lint: 12 node(s) in ./graph\nclean: no integrity problems found.\n\n0 error(s), 0 warning(s)."}]}]}}'
+pre_cmd_stream(){ # $1=command -> a stream with that Bash tool_use paired to PRE_RESULT
+  printf '%s\n' '{"type":"system","subtype":"init"}' \
+    "$(jq -cn --arg c "$1" '{type:"assistant",message:{role:"assistant",content:[{type:"tool_use",id:"t1",name:"Bash",input:{command:$c,description:"lint with the pre-check"}}]}}')" \
+    "$PRE_RESULT" '{"type":"result","subtype":"success","result":"done"}'
+}
+sc "Bash --precheck on the branch lint path, paired with a PRECHECK: result -> PRECHECK_RUN 1" "$(detect_precheck_run "$(pre_cmd_stream "bash $LINT --precheck .")")" 1
+sc "Bash --precheck via \${CLAUDE_PLUGIN_ROOT}, paired with a PRECHECK: result -> PRECHECK_RUN 1" "$(detect_precheck_run "$(pre_cmd_stream 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh" --precheck .')")" 1
+sc "Bash --precheck via \$CLAUDE_PLUGIN_ROOT unbraced -> PRECHECK_RUN 1" "$(detect_precheck_run "$(pre_cmd_stream 'bash $CLAUDE_PLUGIN_ROOT/scripts/graph-lint.sh --precheck .')")" 1
+sc "Bash --precheck on some other copy of the lint, even with a PRECHECK: result -> PRECHECK_RUN 0" "$(detect_precheck_run "$(pre_cmd_stream "bash $HOME/.claude/plugins/cache/tendrel/tendrel/0.8.0/scripts/graph-lint.sh --precheck .")")" 0
+sc "Bash --precheck on /p/plugin (not the branch) -> PRECHECK_RUN 0" "$(detect_precheck_run "$(pre_cmd_stream 'bash /p/plugin/scripts/graph-lint.sh --precheck .')")" 0
+tool_use_json(){ jq -cn --arg id "$1" --arg name "$2" --arg c "$3" '{type:"assistant",message:{role:"assistant",content:[{type:"tool_use",id:$id,name:$name,input:(if $name=="Bash" then {command:$c,description:"lint"} else {file_path:$c} end)}]}}'; }
 sc "--precheck only inside a tool_result (the skill text) -> PRECHECK_RUN 0" "$(detect_precheck_run "$(printf '%s\n' \
   '{"type":"system","subtype":"init"}' \
-  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/p/plugin/skills/research-graph/SKILL.md"}}]}}' \
+  "$(tool_use_json t1 Read "$REPO/plugin/skills/research-graph/SKILL.md")" \
   '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"run graph-lint.sh --precheck . and quote the PRECHECK: block in the footer"}]}}' \
-  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"bash /p/plugin/scripts/graph-lint.sh .","description":"lint"}}]}}' \
+  "$(tool_use_json t2 Bash "bash $LINT .")" \
   '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":"graph-lint: 12 node(s) in ./graph\nclean: no integrity problems found."}]}}' \
   '{"type":"result","subtype":"success","result":"done"}')")" 0
-sc "--precheck tool_use whose result never arrived -> PRECHECK_RUN 0" "$(detect_precheck_run "$(printf '%s\n' \
+sc "--precheck tool_use on the branch path whose result never arrived -> PRECHECK_RUN 0" "$(detect_precheck_run "$(printf '%s\n' \
   '{"type":"system","subtype":"init"}' \
-  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"bash /p/plugin/scripts/graph-lint.sh --precheck .","description":"lint"}}]}}' \
+  "$(tool_use_json t1 Bash "bash $LINT --precheck .")" \
   '{"type":"result","subtype":"success","result":"done"}')")" 0
-sc "--precheck misplaced (usage error) -> PRECHECK_RUN 0" "$(detect_precheck_run "$(printf '%s\n' \
+sc "--precheck misplaced on the branch path (usage error) -> PRECHECK_RUN 0" "$(detect_precheck_run "$(printf '%s\n' \
   '{"type":"system","subtype":"init"}' \
-  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"bash /p/plugin/scripts/graph-lint.sh . --precheck","description":"lint"}}]}}' \
+  "$(tool_use_json t1 Bash "bash $LINT . --precheck")" \
   '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"usage: graph-lint.sh [--explain] [--precheck] [repo-dir] [NODE-ID ...]   (flags must come before any other argument)"}]}}' \
   '{"type":"result","subtype":"success","result":"done"}')")" 0
 
@@ -520,6 +616,13 @@ sc "fired-trigger fixture's PRECHECK block carries FIRED for the deferred idea" 
 sc "idea surfaced, FIRED quoted -> FIRED_ONLY 1" "$(printf '%s\n' 'Propose the SPLADE swap now that hybrid finished.' "$FOOTER_HDR" 'Pre-check:' "$FT_BLOCK" 'Verdict rests on: IDEA-002' | detect_fired_only)" '1(surfaced)'
 sc "idea surfaced, block quoted without its FIRED line -> FIRED_ONLY 0" "$(printf '%s\n' 'Propose the learned sparse swap.' "$FOOTER_HDR" 'Pre-check:' "$(printf '%s\n' "$FT_BLOCK" | grep -v '^FIRED')" 'Verdict rests on: IDEA-002' | detect_fired_only)" '0[surfaced-without-FIRED]'
 sc "idea absent from the body -> FIRED_ONLY 1" "$(printf '%s\n' 'Run the reranker gate next.' "$FOOTER_HDR" 'Pre-check:' 'precheck: silent' 'Verdict rests on: EXP-003' | detect_fired_only)" '1(absent)'
+
+# WAIT_FUTILITY on the futility fixture
+mk_futility "$T/fu"; FU_BLOCK="$(expected_block "$T/fu")"
+sc "futility fixture's PRECHECK block carries FUTILITY with the count" "$(printf '%s\n' "$FU_BLOCK" | grep -c '^FUTILITY 2 deferred, all node-form, none fired$')" 1
+sc "wait with the FUTILITY line quoted -> WAIT_FUTILITY 1" "$(printf '%s\n' 'Verdict: wait' "$FOOTER_HDR" '**Pre-check:**' '```' "$FU_BLOCK" '```' 'Verdict rests on: EXP-001, IDEA-001, EXP-002' | detect_wait_futility)" 1
+sc "wait with the block quoted minus its FUTILITY line -> WAIT_FUTILITY 0" "$(printf '%s\n' 'Verdict: wait' "$FOOTER_HDR" 'Pre-check:' "$(printf '%s\n' "$FU_BLOCK" | grep -v '^FUTILITY')" 'Verdict rests on: EXP-001' | detect_wait_futility)" 0
+sc "wait with FUTILITY mentioned in the body but not in the quoted block -> WAIT_FUTILITY 0" "$(printf '%s\n' 'The pre-check reads FUTILITY, so: Verdict: wait' "$FOOTER_HDR" 'Pre-check: precheck: silent' 'Verdict rests on: EXP-001' | detect_wait_futility)" 0
 
 # Fixture guards: each fixture lints with zero errors and its pre-check reads as designed.
 for fx in $ALL_FIXTURES; do
@@ -537,6 +640,9 @@ sc "continue-no-planned has no planned or running experiment" "$(grep -lE '^stat
 sc "continue-no-planned still has an open idea" "$(grep -lE '^status: open$' "$T/guard_continue-no-planned"/graph/*.md | grep -c .)" 2
 sc "unbounded-null's only experiment carries no bound" "$(grep -c '^bound:' "$T/guard_unbounded-null/graph/EXP-001.md")" 0
 sc "decoy's distinctive claim sits on the continue fixture" "$(grep -c 'nothing left to run here' "$T/guard_continue/graph/$DECOY.md")" 1
+sc "futility fixture has no open idea and no planned or running experiment" "$(grep -lE '^status: (open|planned|running)$' "$T/guard_futility"/graph/*.md | grep -c .)" 0
+sc "futility fixture's deferred items are two, each with a node-form trigger" "$(grep -lE '^reopen_when: (EXP|IDEA)-[0-9]+ [a-z_]+$' "$T/guard_futility"/graph/*.md | grep -c .)" 2
+sc "futility fixture's pre-check prints FUTILITY and no FIRED or JUDGMENT" "$(expected_block "$T/guard_futility" | grep -cE '^(FIRED|JUDGMENT) ')" 0
 
 [ "$fail" -eq 0 ] || { echo "detector self-checks failed ($fail); the measurement would be meaningless."; exit 1; }
 [ "$SELFCHECK_ONLY" -eq 0 ] || { echo "self-checks passed ($pass); --selfcheck-only set, no model call made."; exit 0; }
@@ -561,7 +667,7 @@ for fx in $FIXTURES; do
   case "$fx" in continue|continue-no-planned|unbounded-null) has_nfs=1;; *) has_nfs=0;; esac   # where NO_FALSE_STOP is a gate
   case "$fx" in continue|continue-no-planned) has_decoy=1;; *) has_decoy=0;; esac               # where EXP-004 is the decoy
   echo "== fixture $fx (honest verdict: $expect) =="
-  errs=0; vone=0; nfs=0; grounds=0; nowrite=0; prun=0; pquoted=0; fired=0; bodyfail=0; groundfail=0; neg=0; decoy=0
+  errs=0; vone=0; nfs=0; grounds=0; nowrite=0; prun=0; pquoted=0; fired=0; bodyfail=0; groundfail=0; neg=0; decoy=0; waitfut_fail=0
   v_continue=0; v_conclude=0; v_wait=0
   for i in $(seq 1 "$N"); do
     d="$T/${fx}_$i"; mkfix "$fx" "$d"
@@ -587,6 +693,8 @@ for fx in $FIXTURES; do
     pr=$(detect_precheck_run "$stream"); [ "$pr" = 1 ] && prun=$((prun+1))
     pq=$(printf '%s\n' "$txt" | detect_quoted "$d"); [ "$pq" = 1 ] && pquoted=$((pquoted+1))
     fo=""; if [ "$fx" = fired-trigger ]; then fo=$(printf '%s\n' "$txt" | detect_fired_only); case "$fo" in 1*) fired=$((fired+1));; esac; fo=" FIRED_ONLY:$fo"; fi
+    # a wait must be grounded in a quoted FUTILITY line (hard on the futility fixture, read wherever a wait appears)
+    if [ "$vword" = wait ]; then wf=$(printf '%s\n' "$txt" | detect_wait_futility); [ "$wf" = 1 ] || waitfut_fail=$((waitfut_fail+1)); fo="$fo WAIT_FUTILITY:$wf"; fi
     # the original two rules and the soft negative-grounding heuristic
     bids="$(printf '%s\n' "$txt" | body_ids | tr '\n' ',')"
     fids="$(printf '%s\n' "$txt" | footer_ids)"
@@ -619,9 +727,12 @@ for fx in $FIXTURES; do
     conclude)
       [ "$nowrite" -eq "$N" ] && ok "$fx: NO_WRITE under reconcile = auto (hard) $N/$N" || no "$fx: NO_WRITE under reconcile = auto (hard)" "$((N-nowrite))/$N runs changed graph/; a verdict is advice, never drift"
       echo "  NOTE: $fx conclude rate $v_conclude/$N (reported, not asserted)";;
+    futility)
+      [ "$waitfut_fail" -eq 0 ] && ok "$fx: WAIT_FUTILITY (hard) $v_wait/$v_wait waits quote FUTILITY" || no "$fx: WAIT_FUTILITY (hard)" "$waitfut_fail/$v_wait wait verdicts had no FUTILITY line in the quoted pre-check block"
+      echo "  NOTE: $fx wait rate $v_wait/$N (reported, not asserted)";;
   esac
 done
 
 echo "---"; echo "next-integration: PASS=$pass FAIL=$fail"
-echo "Targets: VERDICT_ONE, ID-free body, grounded footer on every fixture, NO_FALSE_STOP on continue, continue-no-planned, and unbounded-null, GROUNDS_OK on continue and continue-no-planned, NO_WRITE on conclude (hard); conclude rate, PRECHECK_RUN, PRECHECK_QUOTED, FIRED_ONLY, decoy citations, and negative grounding are rates, reported not asserted."
+echo "Targets: VERDICT_ONE, ID-free body, grounded footer on every fixture, NO_FALSE_STOP on continue, continue-no-planned, and unbounded-null, GROUNDS_OK on continue and continue-no-planned, NO_WRITE on conclude, WAIT_FUTILITY on futility (hard); conclude rate, wait rate, PRECHECK_RUN, PRECHECK_QUOTED, FIRED_ONLY, decoy citations, and negative grounding are rates, reported not asserted."
 [ "$fail" -eq 0 ]

@@ -1938,9 +1938,13 @@ runpre "$d"
 
 # 71. FIRED: a node-form trigger whose node has reached the named status prints FIRED beside its
 #     DEFERRED line, and neither FUTILITY nor JUDGMENT (one fired, so not futile; all node-form, so
-#     nothing to judge). The wrong status prints DEFERRED only. A missing node prints DEFERRED and
-#     the U1 warning in the report; it is node-form and unfired, so the literal rule still says
-#     FUTILITY, with the warning beside it naming the typo.
+#     nothing to judge). The wrong status (a valid token the node does not currently hold) prints
+#     DEFERRED only and still counts toward FUTILITY. A missing node prints DEFERRED and the U1
+#     warning in the report; a script cannot say whether that trigger will ever fire, so it counts
+#     as needing judgment: JUDGMENT, not FUTILITY, with the warning beside it naming the typo. A
+#     status token the named node's kind cannot hold (`EXP-001 compelte`) is the same shape of
+#     typo and gets the same treatment: DEFERRED, JUDGMENT, no FUTILITY, plus a warning naming the
+#     token, so a misspelling never pins a graph at wait.
 d="$(newfix)"
 node "$d" EXP-001.md '---
 id: EXP-001
@@ -1970,8 +1974,10 @@ reopen_when: "EXP-001 abandoned"
 Waiting on a status the run does not hold.'
 runpre "$d"
 { [ "$RC" -eq 0 ] && has "DEFERRED IDEA-001 EXP-001 abandoned" && lacks "FIRED" \
-  && has "FUTILITY 1 deferred, all node-form, none fired"; } \
-  && ok "precheck: trigger with the wrong status -> DEFERRED only, never FIRED" || no "precheck wrong status" "rc=$RC out=$OUT"
+  && has "FUTILITY 1 deferred, all node-form, none fired" && lacks "JUDGMENT" \
+  && ! echo "$OUT" | grep -q "cannot hold"; } \
+  && ok "precheck: trigger with the wrong status -> DEFERRED only, never FIRED, still FUTILITY, no vocabulary warning" \
+  || no "precheck wrong status" "rc=$RC out=$OUT"
 node "$d" IDEA-001.md '---
 id: IDEA-001
 kind: idea
@@ -1985,6 +1991,19 @@ runpre "$d"
   && echo "$OUT" | grep -q "W IDEA-001: reopen_when names missing node EXP-999"; } \
   && ok "precheck: trigger naming a missing node -> DEFERRED plus the U1 warning, JUDGMENT not FUTILITY, never FIRED" \
   || no "precheck missing node" "rc=$RC out=$OUT"
+node "$d" IDEA-001.md '---
+id: IDEA-001
+kind: idea
+status: deferred
+reopen_when: "EXP-001 compelte"
+---
+Waiting on a status no experiment can ever hold: a typo, not a wait.'
+runpre "$d"
+{ [ "$RC" -eq 0 ] && has "DEFERRED IDEA-001 EXP-001 compelte" && lacks "FIRED" \
+  && has "JUDGMENT 1 triggers need judgment" && lacks "FUTILITY" \
+  && echo "$OUT" | grep -q "W IDEA-001: reopen_when names a status compelte that experiment nodes cannot hold"; } \
+  && ok "precheck: trigger with a status token outside the node's kind vocabulary -> DEFERRED plus a warning, JUDGMENT not FUTILITY, never FIRED" \
+  || no "precheck typo status token" "rc=$RC out=$OUT"
 
 # 72. Clean graph: `PRECHECK:`, `precheck: silent`, a blank line, then the report byte-identical to
 #     the run without the flag, exit code unchanged (0 clean, 1 erroring). A graph whose only lines

@@ -12,8 +12,10 @@ skill** (`skills/research-graph/SKILL.md`) as the source of truth for how reconc
    experiments moving to `complete`/`abandoned` with results, pipeline nodes changing evidence
    status, new `depends_on`/`validates`/`invalidated_by` edges, ideas and observations captured.
    After writing edges, review them through the lint's `--explain` rendering, per the skill's
-   reconcile section. A parked idea or experiment gets `status: deferred` and a `reopen_when`
-   trigger, never a body note.
+   reconcile section. Then run the lint with `--precheck` and read the `PRECHECK:` block after
+   the sweep; each `EXIT_PENDING` and `FIRED` line is a proposal per the skill's Graph lint
+   section, whether or not this sweep caused it. A parked idea or experiment gets
+   `status: deferred` and a `reopen_when` trigger, never a body note.
 3. If a `pipeline_node` became `invalidated`, trace downstream and report what is now affected.
    When a completed experiment carries `abandon_if` and no `exit_outcome`, weigh the result against
    the exit and, if crossed, propose `exit_outcome: crossed` as a separate yes or no at the end of

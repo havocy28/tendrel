@@ -38,8 +38,8 @@ default branch, so the latest tagged version is what installs pull on `/plugin m
   N item(s)"), read from the lint's `--precheck` output and silent under `verbosity = off`.
   `status.md` gains a "Deferred, reopen when" section listing each deferred item with its trigger,
   and its diagram styles deferred nodes distinctly from open, invalidated, and blocked ones.
-- **Two contract harnesses.** `test/next-integration.sh` measures the verdict against five
-  fixtures (continue, continue-no-planned, unbounded-null, conclude, fired-trigger) with hard
+- **Two contract harnesses.** `test/next-integration.sh` measures the verdict against six
+  fixtures (continue, continue-no-planned, unbounded-null, conclude, fired-trigger, futility) with hard
   no-false-stop gates. Measured 2026-09-19, N=5 per fixture, CLI default model
   (claude-fable-5-1), 0 of 25 runs errored: the continue and unbounded-null fixtures never
   returned conclude or wait, `NO_FALSE_STOP` 5/5 and `GROUNDS_OK` 5/5 on every fixture;
@@ -54,6 +54,13 @@ default branch, so the latest tagged version is what installs pull on `/plugin m
   `auto+crossed` and `ask+crossed` both `NO_ABANDON` 5/5, `NO_MARKER` 5/5, `PROPOSAL` 5/5,
   `SEPARATE` 5/5; `auto+not-crossed` `NO_ABANDON` 5/5, `NO_MARKER` 5/5, false `PROPOSAL` 0/5;
   `auto+fired` `STAYS_DEFERRED` 5/5 and `REOPEN` 5/5; 0 errored across every arm.
+  After review fixes (a sixth `futility` fixture, whole-graph and whole-frontmatter hard gates,
+  the installed plugin copy disabled in each fixture), re-measured N=5: `futility` returned wait
+  5/5 with `FUTILITY` quoted (claude-fable-5-1); on claude-opus-5-5, `continue` returned continue
+  5/5 with `NO_FALSE_STOP` 5/5; both crossed arms held every hard gate 5/5 with `PROPOSAL` 5/5;
+  `auto+not-crossed` held every hard gate 5/5, with the proposal detector firing in 2 of 10 runs,
+  both of which stated in words that the exit was not crossed; `auto+fired` `STAYS_DEFERRED` 5/5,
+  `REOPEN` 4/5.
 
 ### Compatibility
 - Additive in every surface; no existing graph gains a new error. Newly failing patterns: none.

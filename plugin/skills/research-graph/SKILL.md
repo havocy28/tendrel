@@ -207,11 +207,13 @@ When `reconcile = auto`, the user has chosen unattended reconcile writes for thi
   not merely describe the mismatch or save it for a later offer. If you are mid-task when you
   notice, finish the user's task first, then fold the drift in at the end of that same turn.
   Under `auto`, "getting up to speed" includes bringing the graph up to speed.
-- After each auto reconcile, run the lint (`bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh"`;
-  if that variable is unset, locate the plugin's `scripts/graph-lint.sh`) and include the result
-  in the summary. Unattended
+- After each auto reconcile, run the lint (`bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh"
+  --precheck .`; if that variable is unset, locate the plugin's `scripts/graph-lint.sh`) and
+  include the result in the summary. Unattended
   writes get the deterministic check; if the lint reports errors, surface them and offer repair per
-  the Graph lint section (repairs stay approval-gated even under `auto`).
+  the Graph lint section (repairs stay approval-gated even under `auto`). Read the `PRECHECK:`
+  block after the sweep; each `EXIT_PENDING` and `FIRED` line is a proposal per the Graph lint
+  section, whether or not this sweep caused it.
 - An exit stays approval-gated even under `auto`. When you record a result for an experiment
   carrying `abandon_if` and no `exit_outcome`, compare the result to the exit as a judgment (the
   result is free text; nothing deterministic decides this). When it crossed, propose writing
@@ -308,7 +310,7 @@ because a blocked dependency also triggers it, invalidation must propagate all t
 chain, not just one hop. It exits non-zero on errors; warnings (like an empty body) do not fail.
 It also warns, never errors, on a planned experiment that has a `config` and no `abandon_if`, on a
 complete experiment carrying a `validates` edge with no `compared_to`, and on a node-form
-`reopen_when` naming a node that does not exist.
+`reopen_when` naming a node that does not exist or a status that node's kind cannot hold.
 `--explain` is available on demand ("explain the edges", "what does each edge point at?") and
 renders every edge, or only those of the node IDs you name, with its target's first line, so an
 edge that resolves cleanly but says the wrong thing is visible to a reader. `--precheck` prints
@@ -475,8 +477,9 @@ a synthesis of *history into next steps*. It is read-only: it proposes, it never
    dropped, and shelved nodes cannot discriminate and do not count. A `conclude` or `wait` rests
    on the nodes whose evidence settles the line or whose triggers gate it; cite those settling
    nodes, not the ones you are declining to run. A `JUDGMENT` line means a deferred trigger is
-   text, missing (listed as `(no trigger)`), or names a node that does not exist; read it yourself
-   and say what you decided.
+   text, missing (listed as `(no trigger)`), or can never fire as written (it names a node that
+   does not exist, or a status that node's kind cannot hold); read it yourself and say what you
+   decided.
 
    Two evidence rules: a null result with no `bound` in its frontmatter is uninformative, so never
    cite it to conclude a line or to refute anything (it excludes no effect size); a `validates`

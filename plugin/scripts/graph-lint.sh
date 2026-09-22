@@ -312,14 +312,28 @@ for nid, rec in nodes.items():
                       "Write each edge on one line, e.g.  - {rel: depends_on, to: NODE-004}")
 
 # reopen triggers: a node-form `reopen_when` names a node that must exist, or the trigger can never
-# fire and the deferred item is parked forever behind a typo. Warn only, the same weight as the
-# other hygiene nudges, and only for the node form: a text trigger is a sentence for a person to
-# judge, and this lint never evaluates it, so it is never checked here either.
+# fire and the deferred item is parked forever behind a typo. The same goes for the status token:
+# one that the named node's kind cannot hold (`EXP-001 compelte`) is a typo the precheck would
+# otherwise read as an honest wait. Warn only, the same weight as the other hygiene nudges, and only
+# for the node form: a text trigger is a sentence for a person to judge, and this lint never
+# evaluates it, so it is never checked here either.
+def reopen_trigger_unfireable(trig):
+    """True when a node-form trigger can never fire as written: it names a node not in the graph,
+    or a status outside the named node's kind vocabulary (a node whose kind is itself missing or
+    invalid has no vocabulary, and that kind is already an error above). Shared by the hygiene
+    warning below and the precheck's judgment count, so both read the same trigger the same way."""
+    return trig[0] not in nodes or trig[1] not in STATUS.get(nodes[trig[0]]["kind"], set())
+
 for nid, rec in nodes.items():
     trig = reopen_trigger(rec["reopen_when"])
-    if trig and trig[0] not in nodes:
+    if not trig:
+        continue
+    if trig[0] not in nodes:
         warnings.append(f"{nid}: reopen_when names missing node {trig[0]} "
                         f"(the trigger '{rec['reopen_when']}' can never fire)")
+    elif nodes[trig[0]]["kind"] in STATUS and trig[1] not in STATUS[nodes[trig[0]]["kind"]]:
+        warnings.append(f"{nid}: reopen_when names a status {trig[1]} that "
+                        f"{nodes[trig[0]]['kind']} nodes cannot hold")
 
 # edge checks: dangling references and invalidation consistency. A target has exactly two readings:
 # it matches the node-ID pattern and must name a node in graph/, or it is a repo-relative path
@@ -517,14 +531,17 @@ if precheck:
             findings.append(f'EXIT_PENDING {nid} abandon_if="{rec["abandon_if"]}" result={result}')
     # Deferred items and their triggers, evaluated by reopen_trigger() and nothing else, so "fired"
     # here is the same "fired" the session-start report prints. A missing trigger, or a node-form
-    # trigger naming a node that does not exist, counts as a trigger needing judgment: a script can
-    # check neither, and a typo must never pin a graph at wait.
+    # trigger that can never fire as written (it names a node that does not exist, or a status the
+    # named node's kind cannot hold), counts as a trigger needing judgment: a script can check none
+    # of these, and a typo must never pin a graph at wait. A valid status the node does not
+    # currently hold is a different thing: that trigger is honest and unfired, and a node parked in
+    # some other terminal status is the reader's call (plan R3), so it still counts toward futility.
     deferred = [(nid, rec) for nid, rec in nodes.items() if rec["status"] == "deferred"]
     judgment, fired = 0, 0
     for nid, rec in deferred:
         trig = reopen_trigger(rec["reopen_when"])
         findings.append(f"DEFERRED {nid} {rec['reopen_when'] or '(no trigger)'}")
-        if trig is None or trig[0] not in nodes:
+        if trig is None or reopen_trigger_unfireable(trig):
             judgment += 1
         elif nodes[trig[0]]["status"] == trig[1]:
             fired += 1

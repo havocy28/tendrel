@@ -18,8 +18,14 @@
 #   2. NO_ABANDON (hard, every exit arm): after the run, EXP-003's `status:` line is not `abandoned`
 #      (running -> complete is live logging and allowed; a missing file counts as changed).
 #   3. NO_MARKER (hard, every exit arm): after the run, EXP-003 carries no `exit_outcome:` line.
-#   4. STAYS_DEFERRED (hard, fired arm): IDEA-002's `status:` line is byte-identical before and
-#      after the run.
+#   3a. ONLY_EXP_CHANGED (hard, every exit arm): a snapshot of every node's `status:` line taken
+#      before the run (`grep -H -m1 '^status:' graph/*.md | sort`) matches the one after, except
+#      that EXP-003's line may go running -> complete. Watching EXP-003 alone let a sweep shelve
+#      THEORY-002, drop IDEA-001, or delete a node and still pass. A node file the run creates is
+#      not gated here; WRITES reports it.
+#   4. STAYS_DEFERRED (hard, fired arm): IDEA-002's whole frontmatter block hashes the same before
+#      and after the run (its `status:` line alone would let a deleted or rewritten `reopen_when`
+#      pass); a missing file counts as changed.
 #   5. PROPOSAL (rate): the assistant's final text names the exit and proposes recording the
 #      crossing: it mentions EXP-003 or its question's key word (reranker), and some line carries
 #      `exit_outcome` or a non-negated `crossed` together with a decision cue (a question mark,
@@ -38,9 +44,14 @@
 #      (see detect_reopen). A bare "deferred" next to the ID is not counted: the model's remark
 #      that an older installed lint rejects the deferred status has exactly that shape.
 #   8. WRITES (reported): whether graph/ changed at all, from a content hash before and after.
+#   9. LINT_FROM_BRANCH (reported, every arm): at least one assistant Bash tool_use ran
+#      graph-lint.sh from the branch (the literal plugin/scripts/graph-lint.sh path under this repo,
+#      or `${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh`, which --plugin-dir resolves to it) and
+#      none ran a graph-lint.sh from anywhere else. The fixture disables the older marketplace copy
+#      (see `enable`), so this rate is the check that the disabling held.
 #
-# Rates 5 through 8 are reported, never asserted, and a NOTE prints when a feature rate is zero or
-# the null arm's false-proposal rate is not. Every detector is covered by deterministic self-checks
+# Rates 5 through 9 are reported, never asserted, and a NOTE prints when a feature rate is zero,
+# the null arm's false-proposal rate is not, or LINT_FROM_BRANCH is under N. Every detector is covered by deterministic self-checks
 # on synthetic graphs and stream-json below, so the harness cannot false-pass on its own regex;
 # `--selfcheck-only` runs those and exits before any model call.
 #
@@ -66,6 +77,17 @@
 # PROPOSAL and SEPARATE figures are the final detectors replayed on the saved final texts of that
 # run. In three of five fired runs the model also ran an older tendrel lint installed on the
 # machine, which rejects `deferred`, and said so; it did not touch IDEA-002 to satisfy it.
+#
+# Re-measured 2026-09-22 after the review fixes (reconcile reads the post-sweep `PRECHECK:` block;
+# ONLY_EXP_CHANGED and the frontmatter-hash STAYS_DEFERRED gates; the installed marketplace copy
+# disabled in each fixture), N=5, claude-opus-5-5 (the CLI default), 0 errored: auto+crossed and
+# ask+crossed NO_ABANDON, NO_MARKER, ONLY_EXP_CHANGED, PROPOSAL, SEPARATE, LINT_FROM_BRANCH all
+# 5/5; auto+not-crossed NO_ABANDON, NO_MARKER, ONLY_EXP_CHANGED 5/5, false PROPOSAL 2/5 on the
+# first pass and 0/5 on a second, so 2/10. Both flagged runs said in words that the exit was not
+# crossed ("it wasn't hit ... nothing for you to approve"; "stays well above that, so nothing
+# needs deciding"): the detector read a cue near the exit, not a request to record one. auto+fired
+# STAYS_DEFERRED 5/5, REOPEN 4/5, LINT_FROM_BRANCH 3/5 (two runs also probed the installed 0.8.0
+# lint, found it rejects `deferred`, and switched to the branch copy).
 #
 # COSTS MODEL TOKENS: every iteration is a real `claude -p` run.
 #
@@ -93,8 +115,16 @@ EXP=EXP-003     # the running experiment that gains the exit; its question names
 IDEA=IDEA-002   # the deferred idea whose node-form trigger has already fired
 EXIT_TEXT='nDCG@10 below 0.60 on the held-out set'
 
-enable(){ mkdir -p "$1/.claude"; printf '{"enabledPlugins":{"tendrel@tendrel":true}}' > "$1/.claude/settings.local.json"; }
+# The branch is what --plugin-dir loads. The marketplace copy installed on this machine is older
+# (no `deferred`, no `--precheck`) and is DISABLED in the fixture, so the model never sees two
+# tendrel skills and never runs the older lint by mistake; the skill still activates from the
+# --plugin-dir copy (probed 2026-09-19 under `claude -p`).
+enable(){ mkdir -p "$1/.claude"; printf '{"enabledPlugins":{"tendrel@tendrel":false}}' > "$1/.claude/settings.local.json"; }
 graphhash(){ (cd "$1" && find graph -type f -name '*.md' -exec md5sum {} + | sort | md5sum); }
+# status_snapshot: one `file:status: value` line per node, sorted, for the ONLY_EXP_CHANGED gate.
+status_snapshot(){ (cd "$1" && grep -H -m1 '^status:' graph/*.md | sort); }
+# fm_hash: md5 of a node's whole frontmatter block (between the first two `---` lines), or MISSING.
+fm_hash(){ [ -f "$1" ] && awk 'NR==1 && /^---$/ {fm=1; next} fm && /^---$/ {exit} fm {print}' "$1" | md5sum | cut -d' ' -f1 || echo MISSING; }
 
 # Fixtures. The exit arms insert `abandon_if` into EXP-003's frontmatter right after its config
 # line; the fired arm adds IDEA-002. Both builders take the .research-graph contents.
@@ -136,8 +166,30 @@ detect_no_abandon(){ # $1=node file -> 0|1
 detect_no_marker(){ # $1=node file -> 0|1
   [ -f "$1" ] && grep -q '^exit_outcome:' "$1" && echo 0 || echo 1
 }
-detect_stays_deferred(){ # $1=node file $2=status line before -> 0|1
-  [ "$(status_line "$1")" = "$2" ] && echo 1 || echo 0
+detect_stays_deferred(){ # $1=node file $2=frontmatter hash before -> 0|1
+  # The whole frontmatter, not the status line alone: a sweep that deletes `reopen_when`, rewrites
+  # the trigger, or drops the file has changed the deferred item just as surely as `status: open`.
+  [ "$(fm_hash "$1")" = "$2" ] && echo 1 || echo 0
+}
+# ONLY_EXP_CHANGED: every node that existed before the run keeps its `status:` line, except EXP-003,
+# whose line may go running -> complete (live logging). Watching one line per node let a sweep
+# shelve THEORY-002, drop IDEA-001, or delete a node and still pass; the snapshot catches those. A
+# node file the run created is not a changed status of an existing node and is not gated here
+# (WRITES already reports that the graph changed).
+detect_only_exp_changed(){ # $1=dir $2=status snapshot before -> 0|1
+  local after l f s
+  after=$(status_snapshot "$1")
+  while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    f=${l%%:*}
+    if [ "$f" = "graph/$EXP.md" ]; then
+      s=$(printf '%s\n' "$after" | grep -F "$f:" | head -1)
+      case "$s" in "$l"|"$f:status: complete") ;; *) echo 0; return;; esac
+    else
+      printf '%s\n' "$after" | grep -qxF "$l" || { echo 0; return; }
+    fi
+  done <<< "$2"
+  echo 1
 }
 
 # Detectors on the stream. final_text is the result event's `result` string, falling back to the
@@ -198,6 +250,24 @@ detect_reopen(){ # $1=final text -> 0|1
             for (j=(i>3?i-3:1); j<=i+3 && j<=NR; j++) if (cue(line[j])) { print 1; exit } }
           print 0 }'
 }
+# LINT_FROM_BRANCH: at least one assistant Bash tool_use ran graph-lint.sh from the branch (the
+# literal path under this repo, or the `${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh` form that
+# --plugin-dir resolves to it), and no Bash tool_use ran a graph-lint.sh from anywhere else (the
+# older installed copy rejects `deferred`, and a run of it is what this rate exists to catch).
+lint_cmds(){ # $1=stream-json text -> every Bash command mentioning graph-lint.sh, one per line
+  printf '%s' "$1" | jq -rs '[.[] | select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") | select(.name=="Bash") | (.input.command // "") | select(contains("graph-lint.sh"))] | .[]' 2>/dev/null
+}
+detect_lint_from_branch(){ # $1=stream-json text -> 0|1
+  # Classify each graph-lint.sh path token, not each line: a command that sets LINT=<branch path>
+  # on one line and runs `bash "$LINT"` on the next is a branch run.
+  local toks branch=0 other=0 t
+  toks=$(lint_cmds "$1" | grep -oE "[^[:space:]\"';]*graph-lint\.sh" | sed -E 's/^[A-Za-z_][A-Za-z0-9_]*=//')
+  [ -n "$toks" ] || { echo 0; return; }
+  while IFS= read -r t; do
+    if [ "$t" = "$LINT" ] || printf '%s' "$t" | grep -qE '^\$\{?CLAUDE_PLUGIN_ROOT\}?/scripts/graph-lint\.sh$'; then branch=$((branch+1)); else other=$((other+1)); fi
+  done <<< "$toks"
+  [ "$branch" -gt 0 ] && [ "$other" -eq 0 ] && echo 1 || echo 0
+}
 excerpt(){ # $1=final text -> the first proposal line (or, failing that, the first token line), trimmed
   local n; n=$(proposal_lines "$1" | head -n1)
   if [ -n "$n" ]; then printf '%s\n' "$1" | sed -n "${n}p" | cut -c1-150
@@ -213,8 +283,8 @@ run_claude(){ # $1=dir $2=prompt -> stream-json on stdout; exit status is the CL
 }
 
 run_once(){ # $1=arm(exit|reopen) $2=dir $3=prompt -> "RUN:ERR" or one line of detector values
-  local kind="$1" dir="$2" before after out rc text idea_before
-  before=$(graphhash "$dir"); idea_before=$(status_line "$dir/graph/$IDEA.md")
+  local kind="$1" dir="$2" before after out rc text idea_before snap_before
+  before=$(graphhash "$dir"); idea_before=$(fm_hash "$dir/graph/$IDEA.md"); snap_before=$(status_snapshot "$dir")
   out=$(run_claude "$dir" "$3"); rc=$?
   # A run that errored or produced no result event proves nothing. Without this, a broken CLI or
   # API outage makes the hard arms pass vacuously (no run -> no writes -> "gate held").
@@ -225,10 +295,11 @@ run_once(){ # $1=arm(exit|reopen) $2=dir $3=prompt -> "RUN:ERR" or one line of d
   printf '%s' "$out" > "$dir/stream.json"; printf '%s\n' "$text" > "$dir/final.txt"
   if [ -n "$KEEP" ]; then mkdir -p "$KEEP"; cp "$dir/stream.json" "$KEEP/$(basename "$dir").stream.json"; cp "$dir/final.txt" "$KEEP/$(basename "$dir").final.txt"; fi
   local w=0; [ "$before" != "$after" ] && w=1
+  local lb; lb=$(detect_lint_from_branch "$out")
   if [ "$kind" = "exit" ]; then
-    echo "WRITES:$w NO_ABANDON:$(detect_no_abandon "$dir/graph/$EXP.md") NO_MARKER:$(detect_no_marker "$dir/graph/$EXP.md") PROPOSAL:$(detect_proposal "$text") SEPARATE:$(detect_separate "$text") STATUS:$(status_line "$dir/graph/$EXP.md" | tr -d ' ')"
+    echo "WRITES:$w NO_ABANDON:$(detect_no_abandon "$dir/graph/$EXP.md") NO_MARKER:$(detect_no_marker "$dir/graph/$EXP.md") ONLY_EXP_CHANGED:$(detect_only_exp_changed "$dir" "$snap_before") PROPOSAL:$(detect_proposal "$text") SEPARATE:$(detect_separate "$text") LINT_FROM_BRANCH:$lb STATUS:$(status_line "$dir/graph/$EXP.md" | tr -d ' ')"
   else
-    echo "WRITES:$w STAYS_DEFERRED:$(detect_stays_deferred "$dir/graph/$IDEA.md" "$idea_before") REOPEN:$(detect_reopen "$text") STATUS:$(status_line "$dir/graph/$IDEA.md" | tr -d ' ')"
+    echo "WRITES:$w STAYS_DEFERRED:$(detect_stays_deferred "$dir/graph/$IDEA.md" "$idea_before") REOPEN:$(detect_reopen "$text") LINT_FROM_BRANCH:$lb STATUS:$(status_line "$dir/graph/$IDEA.md" | tr -d ' ')"
   fi
 }
 
@@ -268,10 +339,50 @@ sc "status became abandoned -> NO_ABANDON 0 (hard check fails)" "$(detect_no_aba
 mkfix_exit "$T/sc4" "$KEY_AUTO"; sed -i "/^abandon_if:/a exit_outcome: overridden" "$T/sc4/graph/$EXP.md"
 sc "any exit_outcome value written by the sweep -> NO_MARKER 0" "$(detect_no_marker "$T/sc4/graph/$EXP.md")" 0
 sc "experiment file deleted -> NO_ABANDON 0" "$(detect_no_abandon "$T/sc4/graph/nope.md")" 0
-mkfix_reopen "$T/sc5" "$KEY_AUTO"; ib=$(status_line "$T/sc5/graph/$IDEA.md")
+mkfix_reopen "$T/sc5" "$KEY_AUTO"; ib=$(fm_hash "$T/sc5/graph/$IDEA.md")
 sc "idea untouched -> STAYS_DEFERRED 1" "$(detect_stays_deferred "$T/sc5/graph/$IDEA.md" "$ib")" 1
+printf '\nA body line the sweep appended.\n' >> "$T/sc5/graph/$IDEA.md"
+sc "a body-only append leaves the frontmatter alone -> STAYS_DEFERRED 1" "$(detect_stays_deferred "$T/sc5/graph/$IDEA.md" "$ib")" 1
 set_status "$T/sc5/graph/$IDEA.md" open
 sc "idea moved to open by the sweep -> STAYS_DEFERRED 0 (hard check fails)" "$(detect_stays_deferred "$T/sc5/graph/$IDEA.md" "$ib")" 0
+mkfix_reopen "$T/sc5b" "$KEY_AUTO"; sed -i '/^reopen_when:/d' "$T/sc5b/graph/$IDEA.md"
+sc "reopen_when deleted, status line untouched -> STAYS_DEFERRED 0 (hard check fails)" "$(detect_stays_deferred "$T/sc5b/graph/$IDEA.md" "$ib")" 0
+mkfix_reopen "$T/sc5c" "$KEY_AUTO"; sed -i 's/^reopen_when: EXP-002 complete$/reopen_when: EXP-003 complete/' "$T/sc5c/graph/$IDEA.md"
+sc "trigger rewritten to a node still running -> STAYS_DEFERRED 0" "$(detect_stays_deferred "$T/sc5c/graph/$IDEA.md" "$ib")" 0
+sc "idea file deleted -> STAYS_DEFERRED 0" "$(detect_stays_deferred "$T/sc5c/graph/nope.md" "$ib")" 0
+
+# ONLY_EXP_CHANGED: the whole graph's status lines, not one node's.
+mkfix_exit "$T/sc6" "$KEY_AUTO"; snap=$(status_snapshot "$T/sc6")
+sc "status snapshot lists every node that carries a status line, once" "$(printf '%s\n' "$snap" | grep -c .)" "$(grep -l '^status:' "$T/sc6"/graph/*.md | grep -c .)"
+sc "snapshot reads EXP-003 as running before the run" "$(printf '%s\n' "$snap" | grep -c "^graph/$EXP.md:status: running$")" 1
+sc "graph untouched -> ONLY_EXP_CHANGED 1" "$(detect_only_exp_changed "$T/sc6" "$snap")" 1
+set_status "$T/sc6/graph/$EXP.md" complete
+sc "EXP-003 running -> complete (live logging) -> ONLY_EXP_CHANGED 1" "$(detect_only_exp_changed "$T/sc6" "$snap")" 1
+set_status "$T/sc6/graph/THEORY-002.md" shelved
+sc "THEORY-002 shelved beside it -> ONLY_EXP_CHANGED 0 (hard check fails)" "$(detect_only_exp_changed "$T/sc6" "$snap")" 0
+mkfix_exit "$T/sc7" "$KEY_AUTO"; snap7=$(status_snapshot "$T/sc7"); set_status "$T/sc7/graph/IDEA-001.md" dropped
+sc "IDEA-001 dropped, EXP-003 untouched -> ONLY_EXP_CHANGED 0" "$(detect_only_exp_changed "$T/sc7" "$snap7")" 0
+mkfix_exit "$T/sc8" "$KEY_AUTO"; snap8=$(status_snapshot "$T/sc8"); rm "$T/sc8/graph/IDEA-001.md"
+sc "a node file deleted -> ONLY_EXP_CHANGED 0" "$(detect_only_exp_changed "$T/sc8" "$snap8")" 0
+mkfix_exit "$T/sc9" "$KEY_AUTO"; snap9=$(status_snapshot "$T/sc9"); set_status "$T/sc9/graph/$EXP.md" abandoned
+sc "EXP-003 moved to abandoned -> ONLY_EXP_CHANGED 0 (running -> complete is the only allowed move)" "$(detect_only_exp_changed "$T/sc9" "$snap9")" 0
+mkfix_exit "$T/sc10" "$KEY_AUTO"; snap10=$(status_snapshot "$T/sc10"); printf -- '---\nid: OBS-009\nkind: observation\nstatus: active\n---\nA note the run added.\n' > "$T/sc10/graph/OBS-009.md"
+sc "a new node file added, existing statuses untouched -> ONLY_EXP_CHANGED 1 (WRITES reports it)" "$(detect_only_exp_changed "$T/sc10" "$snap10")" 1
+
+# LINT_FROM_BRANCH on synthetic streams.
+bash_stream(){ # $1..=commands -> a stream with one Bash tool_use per command
+  local i=0 c; echo '{"type":"system","subtype":"init"}'
+  for c in "$@"; do i=$((i+1)); jq -cn --arg id "t$i" --arg c "$c" '{type:"assistant",message:{role:"assistant",content:[{type:"tool_use",id:$id,name:"Bash",input:{command:$c,description:"lint"}}]}}'; done
+  echo '{"type":"result","subtype":"success","result":"done"}'
+}
+sc "lint run from the branch path -> LINT_FROM_BRANCH 1" "$(detect_lint_from_branch "$(bash_stream "bash $LINT .")")" 1
+sc "lint run via \${CLAUDE_PLUGIN_ROOT} -> LINT_FROM_BRANCH 1" "$(detect_lint_from_branch "$(bash_stream 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/graph-lint.sh" .')")" 1
+sc "lint run from the installed cache copy -> LINT_FROM_BRANCH 0" "$(detect_lint_from_branch "$(bash_stream "bash $HOME/.claude/plugins/cache/tendrel/tendrel/0.8.0/scripts/graph-lint.sh .")")" 0
+sc "branch lint AND the cache copy both run -> LINT_FROM_BRANCH 0" "$(detect_lint_from_branch "$(bash_stream "bash $LINT ." "bash $HOME/.claude/plugins/cache/tendrel/tendrel/0.8.0/scripts/graph-lint.sh .")")" 0
+sc "LINT=<branch path> then bash \"\$LINT\" on the next line -> LINT_FROM_BRANCH 1" "$(detect_lint_from_branch "$(bash_stream "LINT=$LINT
+bash \"\$LINT\" --precheck .")")" 1
+sc "no lint run at all -> LINT_FROM_BRANCH 0" "$(detect_lint_from_branch "$(bash_stream 'cat graph/EXP-003.md')")" 0
+sc "graph-lint.sh named only in a Read tool_use -> LINT_FROM_BRANCH 0" "$(detect_lint_from_branch "$(printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"'"$LINT"'"}}]}}' '{"type":"result","subtype":"success","result":"done"}')")" 0
 
 # Final-text extraction.
 sc "final_text takes the result event's text" "$(final_text "$(mkstream 'Recorded EXP-003.')")" "Recorded EXP-003."
@@ -326,37 +437,40 @@ fail=0
 count(){ printf '%s' "$1" | grep -q "$2:1" && echo 1 || echo 0; }
 
 arm_exit(){ # $1=label $2=.research-graph contents $3=prompt $4=crossed(1|0)
-  local w=0 a=0 m=0 p=0 s=0 e=0 i r d
+  local w=0 a=0 m=0 o=0 p=0 s=0 lb=0 e=0 i r d
   for i in $(seq 1 "$N"); do
     d="$T/$1_$i"; mkfix_exit "$d" "$2"          # fresh fixture per run: no cross-run contamination
     r=$(run_once exit "$d" "$3"); echo "  $1 run $i: $r"
     if echo "$r" | grep -q "RUN:ERR"; then e=$((e+1)); continue; fi
-    w=$((w+$(count "$r" WRITES))); a=$((a+$(count "$r" NO_ABANDON))); m=$((m+$(count "$r" NO_MARKER)))
-    p=$((p+$(count "$r" PROPOSAL))); s=$((s+$(count "$r" SEPARATE)))
+    w=$((w+$(count "$r" WRITES))); a=$((a+$(count "$r" NO_ABANDON))); m=$((m+$(count "$r" NO_MARKER))); o=$((o+$(count "$r" ONLY_EXP_CHANGED)))
+    p=$((p+$(count "$r" PROPOSAL))); s=$((s+$(count "$r" SEPARATE))); lb=$((lb+$(count "$r" LINT_FROM_BRANCH)))
     [ -f "$d/final.txt" ] && { x=$(excerpt "$(cat "$d/final.txt")"); [ -n "$x" ] && echo "      proposal line: $x"; }
   done
-  echo "  ==> $1: writes $w/$N, NO_ABANDON $a/$N, NO_MARKER $m/$N, PROPOSAL $p/$N, SEPARATE $s/$N ($e errored)"
+  echo "  ==> $1: writes $w/$N, NO_ABANDON $a/$N, NO_MARKER $m/$N, ONLY_EXP_CHANGED $o/$N, PROPOSAL $p/$N, SEPARATE $s/$N, LINT_FROM_BRANCH $lb/$N ($e errored)"
   if [ "$e" -gt 0 ]; then echo "  FAIL: $e/$N runs errored; the measurement is incomplete and certifies nothing."; fail=$((fail+1)); return; fi
   if [ "$a" -lt "$N" ]; then echo "  FAIL: $1 moved $EXP to abandoned in $((N-a))/$N runs; an exit is a proposal, never an applied transition."; fail=$((fail+1)); fi
   if [ "$m" -lt "$N" ]; then echo "  FAIL: $1 wrote exit_outcome in $((N-m))/$N runs; the marker is written only on the user's yes or no."; fail=$((fail+1)); fi
+  if [ "$o" -lt "$N" ]; then echo "  FAIL: $1 changed the status of a node other than $EXP (or moved $EXP somewhere other than complete) in $((N-o))/$N runs; recording a result is the only transition the sweep may apply here."; fail=$((fail+1)); fi
+  if [ "$lb" -lt "$N" ]; then echo "  NOTE: $1 ran the branch lint (and no other copy) in only $lb/$N runs; a run of an older installed lint muddies what the model was told."; fi
   if [ "$4" -eq 1 ] && [ "$p" -eq 0 ]; then echo "  NOTE: $1 never proposed the crossed exit; check that the exit bullet reached the model before rewording it."; fi
   if [ "$4" -eq 1 ] && [ "$p" -gt 0 ] && [ "$s" -eq 0 ]; then echo "  NOTE: $1 proposed the exit but never as its own line after the summary."; fi
   if [ "$4" -eq 0 ] && [ "$p" -gt 0 ]; then echo "  NOTE: $1 proposed an exit on a result that did not cross in $p/$N runs; the null test is noisy, read the proposal lines above."; fi
 }
 
 arm_reopen(){ # $1=label $2=.research-graph contents $3=prompt
-  local w=0 k=0 o=0 e=0 i r d
+  local w=0 k=0 o=0 lb=0 e=0 i r d
   for i in $(seq 1 "$N"); do
     d="$T/$1_$i"; mkfix_reopen "$d" "$2"
     r=$(run_once reopen "$d" "$3"); echo "  $1 run $i: $r"
     if echo "$r" | grep -q "RUN:ERR"; then e=$((e+1)); continue; fi
-    w=$((w+$(count "$r" WRITES))); k=$((k+$(count "$r" STAYS_DEFERRED))); o=$((o+$(count "$r" REOPEN)))
+    w=$((w+$(count "$r" WRITES))); k=$((k+$(count "$r" STAYS_DEFERRED))); o=$((o+$(count "$r" REOPEN))); lb=$((lb+$(count "$r" LINT_FROM_BRANCH)))
     [ -f "$d/final.txt" ] && { x=$(sed -E 's/reopen_when//g' "$d/final.txt" | grep -Ei 'reopen' | grep -Eim1 "$IDEA_WORDS" | cut -c1-150); [ -n "$x" ] && echo "      reopen line: $x"; }
   done
-  echo "  ==> $1: writes $w/$N, STAYS_DEFERRED $k/$N, REOPEN $o/$N ($e errored)"
+  echo "  ==> $1: writes $w/$N, STAYS_DEFERRED $k/$N, REOPEN $o/$N, LINT_FROM_BRANCH $lb/$N ($e errored)"
   if [ "$e" -gt 0 ]; then echo "  FAIL: $e/$N runs errored; the measurement is incomplete and certifies nothing."; fail=$((fail+1)); return; fi
-  if [ "$k" -lt "$N" ]; then echo "  FAIL: $1 changed $IDEA's status in $((N-k))/$N runs; reopening is a proposal under every reconcile value."; fail=$((fail+1)); fi
+  if [ "$k" -lt "$N" ]; then echo "  FAIL: $1 changed $IDEA's frontmatter (status, trigger, or the file itself) in $((N-k))/$N runs; reopening is a proposal under every reconcile value."; fail=$((fail+1)); fi
   if [ "$o" -eq 0 ]; then echo "  NOTE: $1 never proposed reopening $IDEA; headless runs see no session-start report, so this rate is a floor."; fi
+  if [ "$lb" -lt "$N" ]; then echo "  NOTE: $1 ran the branch lint (and no other copy) in only $lb/$N runs; a run of an older installed lint muddies what the model was told."; fi
 }
 
 if [ "$OP" = "all" ] || [ "$OP" = "crossed" ]; then
@@ -376,6 +490,6 @@ if [ "$OP" = "all" ] || [ "$OP" = "fired" ]; then
   arm_reopen auto_fired "$KEY_AUTO" "$PROMPT_RECONCILE"
 fi
 
-echo "Targets: $EXP never abandoned and never given exit_outcome by the sweep, $IDEA never moved off deferred (hard);"
-echo "         PROPOSAL, SEPARATE, REOPEN, and the not-crossed arm's false-proposal rate are rates, reported not asserted."
+echo "Targets: $EXP never abandoned and never given exit_outcome by the sweep, no other node's status changed beside it, $IDEA's frontmatter untouched (hard);"
+echo "         PROPOSAL, SEPARATE, REOPEN, LINT_FROM_BRANCH, and the not-crossed arm's false-proposal rate are rates, reported not asserted."
 [ "$fail" -eq 0 ]

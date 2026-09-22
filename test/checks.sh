@@ -121,6 +121,9 @@ grep -qF 'advice, never drift' "$S" && ok "verdict-is-advice rule present in SKI
 # next.md step 1 must run the lint with the flag whose block the footer quotes
 grep -qF -- '--precheck' plugin/commands/next.md \
   && ok "--precheck named in next.md" || no "--precheck named in next.md"
+# A pending exit or fired trigger from an earlier session reaches the sweep that did not cause it
+grep -qF 'whether or not this sweep caused it' "$S" && ok "sweep-reads-precheck rule present in SKILL.md" \
+  || no "sweep-reads-precheck rule present in SKILL.md" "without it a reconcile only proposes the exits and triggers it caused itself"
 
 # 4. no em dashes in user-facing docs and commands (SKILL.md and spike fixtures excluded:
 #    SKILL.md carries known pre-existing em dashes).
